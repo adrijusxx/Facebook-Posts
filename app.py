@@ -16,6 +16,7 @@ import time
 import threading
 from news_fetcher import NewsFetcher
 from facebook_poster import FacebookPoster
+from ai_content_enhancer import AIContentEnhancer
 from models import db, Post, Settings, NewsSource
 
 # Load environment variables
@@ -34,6 +35,7 @@ db.init_app(app)
 # Initialize components
 news_fetcher = NewsFetcher()
 facebook_poster = FacebookPoster()
+ai_enhancer = AIContentEnhancer()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -65,6 +67,9 @@ def settings():
         settings_obj.facebook_access_token = request.form.get('facebook_access_token', '')
         settings_obj.posting_hours = request.form.get('posting_hours', '9,14,19')
         settings_obj.enabled = 'enabled' in request.form
+        settings_obj.openai_api_key = request.form.get('openai_api_key', '')
+        settings_obj.ai_enhancement_enabled = 'ai_enhancement_enabled' in request.form
+        settings_obj.ai_post_style = request.form.get('ai_post_style', 'informative')
         
         db.session.commit()
         flash('Settings updated successfully!', 'success')
@@ -167,6 +172,71 @@ def api_post_now():
             
     except Exception as e:
         logger.error(f"Error posting: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/test_openai', methods=['POST'])
+def api_test_openai():
+    """Test OpenAI API connection"""
+    api_key = request.json.get('api_key')
+    if not api_key:
+        return jsonify({'success': False, 'error': 'API key required'}), 400
+    
+    result = ai_enhancer.test_openai_connection(api_key)
+    return jsonify(result)
+
+@app.route('/api/generate_custom_post', methods=['POST'])
+def api_generate_custom_post():
+    """Generate a custom post using AI"""
+    try:
+        topic = request.json.get('topic')
+        style = request.json.get('style', 'informative')
+        
+        if not topic:
+            return jsonify({'success': False, 'error': 'Topic is required'}), 400
+        
+        content = ai_enhancer.generate_custom_post(topic, style)
+        
+        if content:
+            return jsonify({'success': True, 'content': content})
+        else:
+            return jsonify({'success': False, 'error': 'Failed to generate content'}), 500
+            
+    except Exception as e:
+        logger.error(f"Error generating custom post: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/content_suggestions', methods=['POST'])
+def api_content_suggestions():
+    """Get content suggestions based on keywords"""
+    try:
+        keywords = request.json.get('keywords', [])
+        if not keywords:
+            keywords = ['trucking', 'logistics', 'transportation']
+        
+        suggestions = ai_enhancer.get_content_suggestions(keywords)
+        return jsonify({'success': True, 'suggestions': suggestions})
+        
+    except Exception as e:
+        logger.error(f"Error getting content suggestions: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/enhance_content', methods=['POST'])
+def api_enhance_content():
+    """Enhance existing content with AI"""
+    try:
+        title = request.json.get('title', '')
+        content = request.json.get('content', '')
+        url = request.json.get('url', '')
+        source = request.json.get('source', '')
+        
+        if not title and not content:
+            return jsonify({'success': False, 'error': 'Title or content required'}), 400
+        
+        enhanced = ai_enhancer.enhance_post_content(title, content, url, source)
+        return jsonify({'success': True, 'enhanced_content': enhanced})
+        
+    except Exception as e:
+        logger.error(f"Error enhancing content: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 def run_scheduler():

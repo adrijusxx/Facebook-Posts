@@ -36,6 +36,9 @@ class Settings(db.Model):
     facebook_access_token = db.Column(db.Text, nullable=True)
     posting_hours = db.Column(db.String(50), default='9,14,19')  # Default: 9 AM, 2 PM, 7 PM
     enabled = db.Column(db.Boolean, default=True)
+    openai_api_key = db.Column(db.Text, nullable=True)
+    ai_enhancement_enabled = db.Column(db.Boolean, default=True)
+    ai_post_style = db.Column(db.String(50), default='informative')  # informative, motivational, question, tip
     last_updated = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     def __repr__(self):

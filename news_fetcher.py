@@ -11,6 +11,7 @@ from newspaper import Article
 from models import db, Post, NewsSource, PostingLog
 import hashlib
 import re
+from ai_content_enhancer import AIContentEnhancer
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,7 @@ class NewsFetcher:
             'commercial vehicle', 'semi truck', 'trailer', 'dispatch',
             'CDL', 'DOT', 'FMCSA', 'hours of service', 'ELD'
         ]
+        self.ai_enhancer = AIContentEnhancer()
     
     def fetch_latest_news(self):
         """Fetch latest news from all enabled sources"""
@@ -205,12 +207,28 @@ class NewsFetcher:
         return saved_articles
     
     def _format_for_facebook(self, article):
-        """Format article content for Facebook posting"""
+        """Format article content for Facebook posting using AI enhancement"""
+        from models import Settings
+        
         title = article['title']
         content = article.get('content', article.get('summary', ''))
         url = article['url']
         source = article['source']
         
+        # Check if AI enhancement is enabled
+        settings = Settings.query.first()
+        if settings and settings.ai_enhancement_enabled and settings.openai_api_key:
+            try:
+                # Use AI to enhance the content
+                enhanced_content = self.ai_enhancer.enhance_post_content(
+                    title, content, url, source
+                )
+                return enhanced_content
+            except Exception as e:
+                logger.error(f"AI enhancement failed, using basic formatting: {e}")
+                # Fall back to basic formatting
+        
+        # Basic formatting (fallback)
         # Clean and truncate content
         if content:
             # Remove extra whitespace and newlines
