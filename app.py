@@ -280,23 +280,30 @@ def run_scheduler():
         schedule.run_pending()
         time.sleep(60)  # Check every minute
 
-if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()
-        
-        # Start scheduler in background thread
-        scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
-        scheduler_thread.start()
-        
-        # Add default news sources if none exist
-        if not NewsSource.query.first():
-            default_sources = [
-                NewsSource(name="Transport Topics", url="https://www.ttnews.com/rss.xml", type="rss", enabled=True),
-                NewsSource(name="Trucking Info", url="https://www.truckinginfo.com/rss", type="rss", enabled=True),
-                NewsSource(name="Fleet Owner", url="https://www.fleetowner.com/rss.xml", type="rss", enabled=True),
-            ]
-            for source in default_sources:
-                db.session.add(source)
-            db.session.commit()
+# Initialize database and defaults
+with app.app_context():
+    db.create_all()
     
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    # Add default news sources if none exist
+    if not NewsSource.query.first():
+        default_sources = [
+            NewsSource(name="Transport Topics", url="https://www.ttnews.com/rss.xml", type="rss", enabled=True),
+            NewsSource(name="Trucking Info", url="https://www.truckinginfo.com/rss", type="rss", enabled=True),
+            NewsSource(name="Fleet Owner", url="https://www.fleetowner.com/rss.xml", type="rss", enabled=True),
+            NewsSource(name="Commercial Carrier Journal", url="https://www.ccjdigital.com/feed/", type="rss", enabled=True),
+            NewsSource(name="Overdrive Magazine", url="https://www.overdriveonline.com/feed/", type="rss", enabled=True),
+        ]
+        for source in default_sources:
+            db.session.add(source)
+        db.session.commit()
+        logger.info(f"Added {len(default_sources)} default news sources")
+
+# Start scheduler in background thread (only if not in serverless environment)
+if not os.getenv('GAE_ENV'):  # Not on App Engine
+    scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
+    scheduler_thread.start()
+    logger.info("Background scheduler started")
+
+if __name__ == '__main__':
+    port = int(os.getenv('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
