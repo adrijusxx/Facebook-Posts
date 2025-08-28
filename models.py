@@ -2,7 +2,7 @@
 Database models for the Facebook Trucking News Automation system
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from flask_sqlalchemy import SQLAlchemy
 
 db = SQLAlchemy()
@@ -19,7 +19,7 @@ class Post(db.Model):
     facebook_post_id = db.Column(db.String(100), nullable=True)
     status = db.Column(db.String(20), default='pending')  # pending, posted, failed, skipped
     source = db.Column(db.String(200), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     posted_at = db.Column(db.DateTime, nullable=True)
     error_message = db.Column(db.Text, nullable=True)
     
@@ -39,7 +39,7 @@ class Settings(db.Model):
     openai_api_key = db.Column(db.Text, nullable=True)
     ai_enhancement_enabled = db.Column(db.Boolean, default=True)
     ai_post_style = db.Column(db.String(50), default='informative')  # informative, motivational, question, tip
-    last_updated = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_updated = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
     def __repr__(self):
         return f'<Settings: {self.posts_per_day} posts/day>'
@@ -55,7 +55,7 @@ class NewsSource(db.Model):
     enabled = db.Column(db.Boolean, default=True)
     last_fetched = db.Column(db.DateTime, nullable=True)
     total_articles_fetched = db.Column(db.Integer, default=0)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     
     def __repr__(self):
         return f'<NewsSource {self.name}: {self.url}>'
@@ -68,7 +68,7 @@ class PostingLog(db.Model):
     post_id = db.Column(db.Integer, db.ForeignKey('posts.id'), nullable=True)
     action = db.Column(db.String(50), nullable=False)  # fetch, post, error, skip
     message = db.Column(db.Text, nullable=True)
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    timestamp = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     
     post = db.relationship('Post', backref=db.backref('logs', lazy=True))
     
