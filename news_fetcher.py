@@ -6,7 +6,7 @@ import feedparser
 import requests
 from bs4 import BeautifulSoup
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from newspaper import Article
 from models import db, Post, NewsSource, PostingLog
 import hashlib
@@ -40,7 +40,7 @@ class NewsFetcher:
                     source_articles = self._fetch_from_website(source)
                 
                 articles.extend(source_articles)
-                source.last_fetched = datetime.utcnow()
+                source.last_fetched = datetime.now(timezone.utc)
                 source.total_articles_fetched += len(source_articles)
                 
                 logger.info(f"Fetched {len(source_articles)} articles from {source.name}")
@@ -263,7 +263,7 @@ class NewsFetcher:
     
     def cleanup_old_posts(self, days_old=30):
         """Clean up old posts to prevent database bloat"""
-        cutoff_date = datetime.utcnow() - timedelta(days=days_old)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_old)
         old_posts = Post.query.filter(Post.created_at < cutoff_date).all()
         
         for post in old_posts:

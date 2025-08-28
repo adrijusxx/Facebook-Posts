@@ -4,7 +4,7 @@ Facebook posting system using Facebook Graph API
 
 import requests
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from models import db, Post, Settings, PostingLog
 import os
 
@@ -53,7 +53,7 @@ class FacebookPoster:
                 # Update post in database
                 post.facebook_post_id = facebook_post_id
                 post.status = 'posted'
-                post.posted_at = datetime.utcnow()
+                post.posted_at = datetime.now(timezone.utc)
                 
                 db.session.commit()
                 
