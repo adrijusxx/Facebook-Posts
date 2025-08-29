@@ -80,6 +80,8 @@ def settings():
         settings_obj.posts_per_day = int(request.form.get('posts_per_day', 3))
         settings_obj.facebook_page_id = request.form.get('facebook_page_id', '')
         settings_obj.facebook_access_token = request.form.get('facebook_access_token', '')
+        settings_obj.facebook_app_id = request.form.get('facebook_app_id', '')
+        settings_obj.facebook_app_secret = request.form.get('facebook_app_secret', '')
         settings_obj.posting_hours = request.form.get('posting_hours', '9,14,19')
         settings_obj.enabled = 'enabled' in request.form
         settings_obj.openai_api_key = request.form.get('openai_api_key', '')
@@ -451,6 +453,121 @@ def api_recover_sources():
         logger.error(f"Error in source recovery: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/renew_facebook_token', methods=['POST'])
+def api_renew_facebook_token():
+    """Manually renew Facebook access token"""
+    try:
+        result = facebook_poster.auto_renew_token_if_needed()
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"Error renewing Facebook token: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/facebook_token_status', methods=['GET'])
+def api_facebook_token_status():
+    """Get Facebook token status and expiration info"""
+    try:
+        settings = Settings.query.first()
+        if not settings or not settings.facebook_access_token:
+            return jsonify({
+                'success': False,
+                'error': 'No Facebook token configured'
+            }), 400
+        
+        # Check token expiration
+        token_info = facebook_poster.check_token_expiration(settings.facebook_access_token)
+        
+        if token_info['success']:
+            return jsonify({
+                'success': True,
+                'token_status': {
+                    'is_valid': token_info.get('is_valid'),
+                    'expires_at': token_info.get('expires_at').isoformat() if token_info.get('expires_at') else None,
+                    'days_until_expiry': token_info.get('days_until_expiry'),
+                    'needs_renewal': token_info.get('needs_renewal'),
+                    'last_renewed': settings.token_last_renewed.isoformat() if settings.token_last_renewed else None,
+                    'stored_expires_at': settings.token_expires_at.isoformat() if settings.token_expires_at else None
+                }
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': token_info.get('error', 'Could not check token status')
+            }), 400
+            
+    except Exception as e:
+        logger.error(f"Error checking Facebook token status: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/setup_facebook_credentials', methods=['POST'])
+def api_setup_facebook_credentials():
+    """Setup Facebook credentials and perform initial token renewal"""
+    try:
+        data = request.json
+        page_id = data.get('page_id')
+        access_token = data.get('access_token')
+        app_id = data.get('app_id')
+        app_secret = data.get('app_secret')
+        
+        if not all([page_id, access_token, app_id, app_secret]):
+            return jsonify({
+                'success': False,
+                'error': 'All Facebook credentials are required: page_id, access_token, app_id, app_secret'
+            }), 400
+        
+        # First, verify the credentials work
+        verify_result = facebook_poster.verify_facebook_credentials(page_id, access_token)
+        if not verify_result['success']:
+            return jsonify({
+                'success': False,
+                'error': f"Facebook credentials verification failed: {verify_result['error']}"
+            }), 400
+        
+        # Save credentials to settings
+        settings = Settings.query.first()
+        if not settings:
+            settings = Settings()
+            db.session.add(settings)
+        
+        settings.facebook_page_id = page_id
+        settings.facebook_access_token = access_token
+        settings.facebook_app_id = app_id
+        settings.facebook_app_secret = app_secret
+        
+        # Try to renew the token immediately to get a fresh long-lived token
+        renewal_result = facebook_poster.renew_long_lived_token(access_token, app_id, app_secret)
+        
+        if renewal_result['success']:
+            # Update with the renewed token
+            settings.facebook_access_token = renewal_result['access_token']
+            settings.token_expires_at = renewal_result['expires_at']
+            settings.token_last_renewed = datetime.now(timezone.utc)
+            
+            db.session.commit()
+            
+            return jsonify({
+                'success': True,
+                'message': 'Facebook credentials setup successfully and token renewed',
+                'page_name': verify_result.get('page_name'),
+                'token_expires_at': renewal_result['expires_at'].isoformat(),
+                'expires_in_days': renewal_result['expires_in'] // 86400
+            })
+        else:
+            # Save credentials anyway, but warn about renewal failure
+            db.session.commit()
+            
+            return jsonify({
+                'success': True,
+                'message': 'Facebook credentials saved, but token renewal failed. You may need to renew manually.',
+                'page_name': verify_result.get('page_name'),
+                'renewal_error': renewal_result.get('error')
+            })
+            
+    except Exception as e:
+        logger.error(f"Error setting up Facebook credentials: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/health')
 def api_health():
     """Health check endpoint"""
@@ -516,7 +633,7 @@ def api_health():
 
 def run_scheduler():
     """Run the post scheduler in a separate thread"""
-    def job():
+    def posting_job():
         """Scheduled job to post content"""
         settings_obj = Settings.query.first()
         if not settings_obj or not settings_obj.enabled:
@@ -548,8 +665,39 @@ def run_scheduler():
         except Exception as e:
             logger.error(f"Scheduler error: {e}")
     
+    def token_renewal_job():
+        """Scheduled job to check and renew Facebook token"""
+        try:
+            with app.app_context():
+                settings_obj = Settings.query.first()
+                if not settings_obj or not settings_obj.facebook_access_token:
+                    return
+                
+                if not settings_obj.facebook_app_id or not settings_obj.facebook_app_secret:
+                    logger.warning("Facebook app credentials not configured for token renewal")
+                    return
+                
+                # Check if token needs renewal (expires in less than 10 days)
+                result = facebook_poster.auto_renew_token_if_needed()
+                
+                if result['success'] and result.get('renewed'):
+                    logger.info(f"Scheduled token renewal successful: {result['message']}")
+                elif result['success'] and not result.get('renewed'):
+                    logger.debug(f"Token renewal check: {result['message']}")
+                else:
+                    logger.error(f"Scheduled token renewal failed: {result.get('error')}")
+                    
+        except Exception as e:
+            logger.error(f"Token renewal scheduler error: {e}")
+    
     # Schedule posts every hour, the job function will check if it should actually post
-    schedule.every().hour.do(job)
+    schedule.every().hour.do(posting_job)
+    
+    # Schedule token renewal check every day at 2 AM
+    schedule.every().day.at("02:00").do(token_renewal_job)
+    
+    # Also run token renewal job immediately on startup
+    token_renewal_job()
     
     while True:
         schedule.run_pending()
@@ -558,6 +706,64 @@ def run_scheduler():
 # Initialize database and defaults
 with app.app_context():
     db.create_all()
+    
+    # Setup Facebook credentials if not already configured
+    settings = Settings.query.first()
+    if not settings or not settings.facebook_access_token:
+        logger.info("Setting up initial Facebook credentials...")
+        
+        # Your Facebook credentials
+        credentials = {
+            'page_id': '534295833110036',
+            'access_token': 'EAAQrAsA1wosBPK5HVZBFUaNhrqJd2mQtv4Nmppm6f2LxlnCZCMaEfzASMncXpdcriUqWYO9bP21BEjkWHeZAHyjdYVhSivmYIpeNY2mBuv2vbQb97QHkOei5v5YE9TT8DUyy7VcynB4pqZAxs6vu2xOCrNn9NIwYsgBFmk3OsmwGwiYmiPI5BcWZBk0nUMp9cbOoXorgzJzPWJyZC9S05FdnTxFa4Fh24TCiqZAYCZAa8Xm9BAZDZD',
+            'app_id': '1173190721520267',
+            'app_secret': 'f90fd5f582a74db3b857396e1b718a63'
+        }
+        
+        try:
+            # Verify credentials
+            verify_result = facebook_poster.verify_facebook_credentials(
+                credentials['page_id'], 
+                credentials['access_token']
+            )
+            
+            if verify_result['success']:
+                logger.info(f"✅ Facebook page verified: {verify_result.get('page_name')}")
+                
+                # Create settings if not exists
+                if not settings:
+                    settings = Settings()
+                    db.session.add(settings)
+                
+                # Save credentials
+                settings.facebook_page_id = credentials['page_id']
+                settings.facebook_access_token = credentials['access_token']
+                settings.facebook_app_id = credentials['app_id']
+                settings.facebook_app_secret = credentials['app_secret']
+                
+                # Try to renew token
+                renewal_result = facebook_poster.renew_long_lived_token(
+                    credentials['access_token'], 
+                    credentials['app_id'], 
+                    credentials['app_secret']
+                )
+                
+                if renewal_result['success']:
+                    logger.info(f"✅ Token renewed successfully! Expires in {renewal_result['expires_in'] // 86400} days")
+                    settings.facebook_access_token = renewal_result['access_token']
+                    settings.token_expires_at = renewal_result['expires_at']
+                    settings.token_last_renewed = datetime.now(timezone.utc)
+                else:
+                    logger.warning(f"⚠️  Token renewal failed: {renewal_result.get('error')}")
+                
+                db.session.commit()
+                logger.info("🎉 Facebook credentials setup completed!")
+                
+            else:
+                logger.error(f"❌ Facebook credentials verification failed: {verify_result['error']}")
+                
+        except Exception as e:
+            logger.error(f"Error setting up Facebook credentials: {e}")
     
     # Add default news sources if none exist
     if not NewsSource.query.first():

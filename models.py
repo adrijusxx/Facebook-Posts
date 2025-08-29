@@ -34,6 +34,10 @@ class Settings(db.Model):
     posts_per_day = db.Column(db.Integer, default=3)
     facebook_page_id = db.Column(db.String(100), nullable=True)
     facebook_access_token = db.Column(db.Text, nullable=True)
+    facebook_app_id = db.Column(db.String(100), nullable=True)
+    facebook_app_secret = db.Column(db.Text, nullable=True)
+    token_expires_at = db.Column(db.DateTime, nullable=True)
+    token_last_renewed = db.Column(db.DateTime, nullable=True)
     posting_hours = db.Column(db.String(50), default='9,14,19')  # Default: 9 AM, 2 PM, 7 PM
     enabled = db.Column(db.Boolean, default=True)
     openai_api_key = db.Column(db.Text, nullable=True)

@@ -4,7 +4,7 @@ Facebook posting system using Facebook Graph API
 
 import requests
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from models import db, Post, Settings, PostingLog
 import os
 
@@ -305,6 +305,172 @@ class FacebookPoster:
                 'success': False,
                 'error': f"Error fetching insights: {str(e)}"
             }
+    
+    def renew_long_lived_token(self, current_token, app_id, app_secret):
+        """Renew a long-lived access token"""
+        try:
+            # Facebook Graph API endpoint for extending token
+            endpoint = f"{self.base_url}/oauth/access_token"
+            params = {
+                'grant_type': 'fb_exchange_token',
+                'client_id': app_id,
+                'client_secret': app_secret,
+                'fb_exchange_token': current_token
+            }
+            
+            response = requests.get(endpoint, params=params, timeout=30)
+            
+            if response.status_code == 200:
+                response_data = response.json()
+                new_token = response_data.get('access_token')
+                expires_in = response_data.get('expires_in', 5184000)  # Default 60 days in seconds
+                
+                if new_token:
+                    # Calculate expiration date
+                    expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+                    
+                    return {
+                        'success': True,
+                        'access_token': new_token,
+                        'expires_in': expires_in,
+                        'expires_at': expires_at,
+                        'message': f'Token renewed successfully. Expires in {expires_in // 86400} days.'
+                    }
+                else:
+                    return {
+                        'success': False,
+                        'error': 'No access token in response'
+                    }
+            else:
+                try:
+                    error_data = response.json()
+                    error_info = error_data.get('error', {})
+                    error_message = error_info.get('message', 'Unknown error')
+                    return {
+                        'success': False,
+                        'error': f"Token renewal failed: {error_message}"
+                    }
+                except:
+                    return {
+                        'success': False,
+                        'error': f"Token renewal failed: {response.status_code} - {response.text}"
+                    }
+                    
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f"Token renewal error: {str(e)}"
+            }
+    
+    def check_token_expiration(self, access_token):
+        """Check when the current token expires"""
+        try:
+            # Use the debug_token endpoint to get token info
+            endpoint = f"{self.base_url}/debug_token"
+            params = {
+                'input_token': access_token,
+                'access_token': access_token  # Can use the same token to debug itself
+            }
+            
+            response = requests.get(endpoint, params=params, timeout=10)
+            
+            if response.status_code == 200:
+                response_data = response.json()
+                token_data = response_data.get('data', {})
+                
+                expires_at_timestamp = token_data.get('expires_at')
+                is_valid = token_data.get('is_valid', False)
+                app_id = token_data.get('app_id')
+                user_id = token_data.get('user_id')
+                
+                if expires_at_timestamp and expires_at_timestamp != 0:
+                    expires_at = datetime.fromtimestamp(expires_at_timestamp, tz=timezone.utc)
+                    days_until_expiry = (expires_at - datetime.now(timezone.utc)).days
+                else:
+                    expires_at = None
+                    days_until_expiry = None
+                
+                return {
+                    'success': True,
+                    'is_valid': is_valid,
+                    'expires_at': expires_at,
+                    'days_until_expiry': days_until_expiry,
+                    'app_id': app_id,
+                    'user_id': user_id,
+                    'needs_renewal': days_until_expiry is not None and days_until_expiry < 10
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': f"Could not check token expiration: {response.text}"
+                }
+                
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f"Error checking token expiration: {str(e)}"
+            }
+    
+    def auto_renew_token_if_needed(self):
+        """Automatically renew token if it's close to expiring"""
+        try:
+            settings = Settings.query.first()
+            if not settings or not settings.facebook_access_token:
+                return {'success': False, 'error': 'No Facebook token configured'}
+            
+            if not settings.facebook_app_id or not settings.facebook_app_secret:
+                return {'success': False, 'error': 'Facebook app credentials not configured'}
+            
+            # Check current token expiration
+            token_info = self.check_token_expiration(settings.facebook_access_token)
+            
+            if not token_info['success']:
+                return token_info
+            
+            # If token expires in less than 10 days or we don't know when it expires, renew it
+            needs_renewal = token_info.get('needs_renewal', False)
+            days_until_expiry = token_info.get('days_until_expiry')
+            
+            if needs_renewal or days_until_expiry is None:
+                logger.info(f"Renewing Facebook token (expires in {days_until_expiry} days)")
+                
+                # Renew the token
+                renewal_result = self.renew_long_lived_token(
+                    settings.facebook_access_token,
+                    settings.facebook_app_id,
+                    settings.facebook_app_secret
+                )
+                
+                if renewal_result['success']:
+                    # Update settings with new token
+                    settings.facebook_access_token = renewal_result['access_token']
+                    settings.token_expires_at = renewal_result['expires_at']
+                    settings.token_last_renewed = datetime.now(timezone.utc)
+                    
+                    db.session.commit()
+                    
+                    logger.info(f"Successfully renewed Facebook token. New expiration: {renewal_result['expires_at']}")
+                    
+                    return {
+                        'success': True,
+                        'renewed': True,
+                        'message': renewal_result['message'],
+                        'expires_at': renewal_result['expires_at']
+                    }
+                else:
+                    logger.error(f"Failed to renew Facebook token: {renewal_result['error']}")
+                    return renewal_result
+            else:
+                return {
+                    'success': True,
+                    'renewed': False,
+                    'message': f'Token is still valid for {days_until_expiry} days',
+                    'days_until_expiry': days_until_expiry
+                }
+                
+        except Exception as e:
+            logger.error(f"Error in auto token renewal: {e}")
+            return {'success': False, 'error': str(e)}
     
     def _log_action(self, action, message, post_id=None):
         """Log an action to the database"""
