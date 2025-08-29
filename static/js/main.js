@@ -341,6 +341,36 @@ function saveAIPost() {
     });
 }
 
+function checkHealth() {
+    const button = event.target.closest('button');
+    const originalText = button.innerHTML;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking...';
+    button.disabled = true;
+    
+    fetch('/api/health')
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'healthy') {
+                const stats = data.stats;
+                const message = `System Healthy! Posts: ${stats.total_posts}, Pending: ${stats.pending_posts}, Sources: ${stats.enabled_sources}/${stats.total_sources}`;
+                showAlert(message, 'success');
+                
+                // Log detailed health info to console
+                console.log('System Health:', data);
+            } else {
+                showAlert('System Health Check Failed: ' + data.error, 'danger');
+            }
+        })
+        .catch(error => {
+            console.error('Health check error:', error);
+            showAlert('Health check failed: ' + error.message, 'danger');
+        })
+        .finally(() => {
+            button.innerHTML = originalText;
+            button.disabled = false;
+        });
+}
+
 // Form validation helpers
 function validateForm(formElement) {
     const inputs = formElement.querySelectorAll('input[required], select[required], textarea[required]');

@@ -189,6 +189,32 @@ def api_post_now():
         logger.error(f"Error posting: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/post_single', methods=['POST'])
+def api_post_single():
+    """Post a single article by ID"""
+    try:
+        post_id = request.json.get('post_id')
+        if not post_id:
+            return jsonify({'success': False, 'error': 'Post ID is required'}), 400
+        
+        post = Post.query.get(post_id)
+        if not post:
+            return jsonify({'success': False, 'error': 'Post not found'}), 404
+        
+        if post.status == 'posted':
+            return jsonify({'success': False, 'error': 'Post has already been published'}), 400
+        
+        # Post to Facebook
+        result = facebook_poster.post_to_facebook(post)
+        if result['success']:
+            return jsonify({'success': True, 'message': 'Post published successfully!'})
+        else:
+            return jsonify({'success': False, 'error': result['error']}), 500
+            
+    except Exception as e:
+        logger.error(f"Error posting single article: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/test_openai', methods=['POST'])
 def api_test_openai():
     """Test OpenAI API connection"""
@@ -254,6 +280,145 @@ def api_enhance_content():
         logger.error(f"Error enhancing content: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/test_rss/<int:source_id>', methods=['POST'])
+def api_test_rss(source_id):
+    """Test a specific RSS feed"""
+    try:
+        source = NewsSource.query.get_or_404(source_id)
+        
+        # Use the enhanced test method from NewsFetcher
+        result = news_fetcher.test_rss_source(source)
+        
+        if result.get('error'):
+            return jsonify({
+                'success': False,
+                'error': result['error'],
+                'details': result
+            }), 400
+        else:
+            return jsonify({
+                'success': True,
+                'message': f'RSS feed working: {result["total_entries"]} entries found, {result.get("trucking_entries", 0)} trucking-related',
+                'total_entries': result['total_entries'],
+                'trucking_entries': result.get('trucking_entries', 0),
+                'preview': result['entries_preview'],
+                'details': result
+            })
+            
+    except Exception as e:
+        logger.error(f"Error testing RSS feed: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/test_all_rss', methods=['POST'])
+def api_test_all_rss():
+    """Test all RSS feeds at once"""
+    try:
+        sources = NewsSource.query.filter_by(enabled=True).all()
+        
+        if not sources:
+            return jsonify({'success': False, 'error': 'No enabled news sources found'}), 400
+        
+        results = []
+        for source in sources:
+            if source.type == 'rss':
+                result = news_fetcher.test_rss_source(source)
+                results.append(result)
+        
+        # Summary
+        total_sources = len(results)
+        working_sources = sum(1 for r in results if not r.get('error'))
+        total_entries = sum(r.get('total_entries', 0) for r in results)
+        total_trucking_entries = sum(r.get('trucking_entries', 0) for r in results)
+        
+        return jsonify({
+            'success': True,
+            'summary': {
+                'total_sources': total_sources,
+                'working_sources': working_sources,
+                'total_entries': total_entries,
+                'total_trucking_entries': total_trucking_entries
+            },
+            'results': results
+        })
+        
+    except Exception as e:
+        logger.error(f"Error testing all RSS feeds: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/validate_rss', methods=['POST'])
+def api_validate_rss():
+    """Validate an RSS feed URL"""
+    try:
+        data = request.json
+        if not data or 'url' not in data:
+            return jsonify({'success': False, 'error': 'URL is required'}), 400
+        
+        url = data['url']
+        validation_result = news_fetcher.validate_rss_feed(url)
+        
+        if validation_result['is_valid']:
+            return jsonify({
+                'success': True,
+                'message': f'RSS feed is valid: {validation_result["info"]["entry_count"]} entries found',
+                'validation': validation_result
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'RSS feed validation failed',
+                'validation': validation_result
+            }), 400
+            
+    except Exception as e:
+        logger.error(f"Error validating RSS feed: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/health')
+def api_health():
+    """Health check endpoint"""
+    try:
+        # Check database connection
+        db.session.execute('SELECT 1')
+        
+        # Get basic stats
+        total_posts = Post.query.count()
+        pending_posts = Post.query.filter_by(status='pending').count()
+        posted_posts = Post.query.filter_by(status='posted').count()
+        
+        # Check news sources
+        total_sources = NewsSource.query.count()
+        enabled_sources = NewsSource.query.filter_by(enabled=True).count()
+        
+        # Get recent activity
+        recent_posts = Post.query.order_by(Post.created_at.desc()).limit(5).all()
+        recent_activity = [{
+            'title': post.title,
+            'status': post.status,
+            'created_at': post.created_at.isoformat() if post.created_at else None
+        } for post in recent_posts]
+        
+        return jsonify({
+            'status': 'healthy',
+            'database': 'connected',
+            'stats': {
+                'total_posts': total_posts,
+                'pending_posts': pending_posts,
+                'posted_posts': posted_posts,
+                'total_sources': total_sources,
+                'enabled_sources': enabled_sources
+            },
+            'recent_activity': recent_activity,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return jsonify({
+            'status': 'unhealthy',
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
 def run_scheduler():
     """Run the post scheduler in a separate thread"""
     def job():
@@ -307,11 +472,36 @@ with app.app_context():
             NewsSource(name="Fleet Owner", url="https://www.fleetowner.com/rss.xml", type="rss", enabled=True),
             NewsSource(name="Commercial Carrier Journal", url="https://www.ccjdigital.com/feed/", type="rss", enabled=True),
             NewsSource(name="Overdrive Magazine", url="https://www.overdriveonline.com/feed/", type="rss", enabled=True),
+            # Add some alternative sources that might be more reliable
+            NewsSource(name="Truck News", url="https://www.trucknews.com/feed/", type="rss", enabled=True),
+            NewsSource(name="Trucking.com", url="https://www.trucking.com/feed/", type="rss", enabled=True),
         ]
         for source in default_sources:
             db.session.add(source)
         db.session.commit()
         logger.info(f"Added {len(default_sources)} default news sources")
+        
+        # Test RSS feeds to see which ones are working
+        logger.info("Testing RSS feeds...")
+        for source in default_sources:
+            try:
+                import feedparser
+                feed = feedparser.parse(source.url)
+                if feed.entries:
+                    logger.info(f"✓ {source.name}: {len(feed.entries)} entries found")
+                else:
+                    logger.warning(f"✗ {source.name}: No entries found in RSS feed")
+                    # Try to disable sources that don't work
+                    source.enabled = False
+                    logger.info(f"Disabled {source.name} due to no entries")
+            except Exception as e:
+                logger.error(f"✗ {source.name}: Error testing RSS feed: {e}")
+                # Disable problematic sources
+                source.enabled = False
+                logger.info(f"Disabled {source.name} due to error: {e}")
+        
+        # Commit the changes
+        db.session.commit()
 
 # Start scheduler in background thread (only if not in serverless environment)
 if not os.getenv('GAE_ENV'):  # Not on App Engine

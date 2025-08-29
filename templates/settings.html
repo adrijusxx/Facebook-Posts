@@ -199,9 +199,14 @@
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5><i class="fas fa-rss"></i> News Sources</h5>
-                <button type="button" class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#addSourceModal">
-                    <i class="fas fa-plus"></i> Add Source
-                </button>
+                <div>
+                    <button type="button" class="btn btn-info btn-sm me-2" onclick="testAllRSS()">
+                        <i class="fas fa-wifi"></i> Test All RSS
+                    </button>
+                    <button type="button" class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#addSourceModal">
+                        <i class="fas fa-plus"></i> Add Source
+                    </button>
+                </div>
             </div>
             <div class="card-body">
                 {% if news_sources %}
@@ -245,6 +250,11 @@
                                     <td>{{ source.total_articles_fetched }}</td>
                                     <td>
                                         <div class="btn-group btn-group-sm" role="group">
+                                            <button type="button" class="btn btn-outline-info" 
+                                                    onclick="testRSSFeed({{ source.id }})" 
+                                                    data-bs-toggle="tooltip" title="Test RSS Feed">
+                                                <i class="fas fa-wifi"></i>
+                                            </button>
                                             <form method="POST" action="{{ url_for('toggle_news_source', source_id=source.id) }}" class="d-inline">
                                                 <button type="submit" class="btn btn-outline-{{ 'warning' if source.enabled else 'success' }}" 
                                                         data-bs-toggle="tooltip" title="{{ 'Disable' if source.enabled else 'Enable' }}">
@@ -291,8 +301,14 @@
                     </div>
                     <div class="mb-3">
                         <label for="sourceUrl" class="form-label">URL</label>
-                        <input type="url" class="form-control" id="sourceUrl" name="url" required>
+                        <div class="input-group">
+                            <input type="url" class="form-control" id="sourceUrl" name="url" required>
+                            <button type="button" class="btn btn-outline-info" onclick="validateRSSUrl()">
+                                <i class="fas fa-check"></i> Validate
+                            </button>
+                        </div>
                         <div class="form-text">RSS feed URL or website URL</div>
+                        <div id="urlValidationResult"></div>
                     </div>
                     <div class="mb-3">
                         <label for="sourceType" class="form-label">Type</label>
@@ -414,6 +430,138 @@ function testOpenAIConnection() {
     .catch(error => {
         document.getElementById('openaiStatus').innerHTML = 
             '<span class="badge bg-danger ms-2">Connection failed: ' + error.message + '</span>';
+    });
+}
+
+function testRSSFeed(sourceId) {
+    // Show loading state
+    const button = event.target.closest('button');
+    const originalIcon = button.innerHTML;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    button.disabled = true;
+    
+    fetch(`/api/test_rss/${sourceId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showAlert(`RSS feed working: ${data.total_entries} entries found, ${data.trucking_entries} trucking-related`, 'success');
+            console.log('RSS details:', data.details);
+        } else {
+            showAlert(`RSS feed error: ${data.error}`, 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Error testing RSS:', error);
+        showAlert('Error testing RSS feed: ' + error.message, 'danger');
+    })
+    .finally(() => {
+        // Restore button state
+        button.innerHTML = originalIcon;
+        button.disabled = false;
+    });
+}
+
+function testAllRSS() {
+    const button = event.target.closest('button');
+    const originalText = button.innerHTML;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Testing...';
+    button.disabled = true;
+    
+    fetch('/api/test_all_rss', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const summary = data.summary;
+            const message = `RSS Test Complete: ${summary.working_sources}/${summary.total_sources} sources working, ${summary.total_entries} total entries, ${summary.total_trucking_entries} trucking-related`;
+            showAlert(message, 'success');
+            console.log('All RSS test results:', data);
+        } else {
+            showAlert('RSS test failed: ' + data.error, 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Error testing all RSS:', error);
+        showAlert('Error testing all RSS feeds: ' + error.message, 'danger');
+    })
+    .finally(() => {
+        button.innerHTML = originalText;
+        button.disabled = false;
+    });
+}
+
+function validateRSSUrl() {
+    const urlInput = document.getElementById('sourceUrl');
+    const url = urlInput.value.trim();
+    const resultDiv = document.getElementById('urlValidationResult');
+    
+    if (!url) {
+        resultDiv.innerHTML = '<div class="alert alert-warning mt-2">Please enter a URL to validate</div>';
+        return;
+    }
+    
+    // Show loading state
+    resultDiv.innerHTML = '<div class="alert alert-info mt-2"><i class="fas fa-spinner fa-spin"></i> Validating RSS feed...</div>';
+    
+    fetch('/api/validate_rss', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ url: url })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const validation = data.validation;
+            const info = validation.info;
+            resultDiv.innerHTML = `
+                <div class="alert alert-success mt-2">
+                    <h6><i class="fas fa-check-circle"></i> RSS Feed Valid!</h6>
+                    <p><strong>Title:</strong> ${info.title || 'N/A'}</p>
+                    <p><strong>Type:</strong> ${validation.feed_type}</p>
+                    <p><strong>Entries:</strong> ${info.entry_count}</p>
+                    <p><strong>Description:</strong> ${info.description || 'N/A'}</p>
+                </div>
+            `;
+        } else {
+            const validation = data.validation;
+            let issuesHtml = '';
+            if (validation.issues && validation.issues.length > 0) {
+                issuesHtml = '<ul><li>' + validation.issues.join('</li><li>') + '</li></ul>';
+            }
+            
+            let warningsHtml = '';
+            if (validation.warnings && validation.warnings.length > 0) {
+                warningsHtml = '<p><strong>Warnings:</strong></p><ul><li>' + validation.warnings.join('</li><li>') + '</li></ul>';
+            }
+            
+            resultDiv.innerHTML = `
+                <div class="alert alert-danger mt-2">
+                    <h6><i class="fas fa-exclamation-triangle"></i> RSS Feed Invalid</h6>
+                    <p><strong>Type:</strong> ${validation.feed_type}</p>
+                    ${issuesHtml}
+                    ${warningsHtml}
+                </div>
+            `;
+        }
+    })
+    .catch(error => {
+        console.error('Error validating RSS:', error);
+        resultDiv.innerHTML = `
+            <div class="alert alert-danger mt-2">
+                <i class="fas fa-exclamation-triangle"></i> Error validating RSS feed: ${error.message}
+            </div>
+        `;
     });
 }
 
