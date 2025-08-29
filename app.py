@@ -82,11 +82,14 @@ def settings():
         settings_obj.posts_per_day = int(request.form.get('posts_per_day', 3))
         settings_obj.facebook_page_id = request.form.get('facebook_page_id', '')
         settings_obj.facebook_access_token = request.form.get('facebook_access_token', '')
+        settings_obj.facebook_app_id = request.form.get('facebook_app_id', '')
+        settings_obj.facebook_app_secret = request.form.get('facebook_app_secret', '')
         settings_obj.posting_hours = request.form.get('posting_hours', '9,14,19')
         settings_obj.enabled = 'enabled' in request.form
         settings_obj.openai_api_key = request.form.get('openai_api_key', '')
         settings_obj.ai_enhancement_enabled = 'ai_enhancement_enabled' in request.form
         settings_obj.ai_post_style = request.form.get('ai_post_style', 'informative')
+        settings_obj.facebook_token_auto_renew = 'facebook_token_auto_renew' in request.form
         
         db.session.commit()
         flash('Settings updated successfully!', 'success')
@@ -137,6 +140,115 @@ def delete_news_source(source_id):
     db.session.commit()
     flash(f'News source {source.name} deleted!', 'success')
     return redirect(url_for('settings'))
+
+@app.route('/refresh_facebook_token', methods=['POST'])
+def refresh_facebook_token():
+    """Refresh Facebook access token using app credentials"""
+    try:
+        settings_obj = Settings.query.first()
+        if not settings_obj:
+            return jsonify({'success': False, 'error': 'No settings found'})
+        
+        app_id = settings_obj.facebook_app_id
+        app_secret = settings_obj.facebook_app_secret
+        current_token = settings_obj.facebook_access_token
+        page_id = settings_obj.facebook_page_id
+        
+        if not all([app_id, app_secret, current_token, page_id]):
+            return jsonify({
+                'success': False, 
+                'error': 'Missing required credentials (App ID, App Secret, current token, or Page ID)'
+            })
+        
+        # Use the token manager to refresh the token
+        result = token_manager.renew_page_access_token(app_id, app_secret, current_token, page_id)
+        
+        if result['success']:
+            # Update the settings with the new token
+            settings_obj.facebook_access_token = result['access_token']
+            
+            # Get token info and update expiry if available
+            token_info = token_manager.validate_token_and_get_info(result['access_token'])
+            if token_info['success'] and token_info.get('expiry_date'):
+                settings_obj.facebook_token_expires_at = token_info['expiry_date']
+            
+            settings_obj.facebook_token_last_renewed = datetime.now(timezone.utc)
+            db.session.commit()
+            
+            logger.info("Facebook token refreshed successfully via API")
+            return jsonify({
+                'success': True, 
+                'message': 'Token refreshed successfully',
+                'token_info': token_info if token_info['success'] else None
+            })
+        else:
+            return jsonify({'success': False, 'error': result['error']})
+            
+    except Exception as e:
+        logger.error(f"Error refreshing Facebook token: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/prepopulate_settings', methods=['POST'])
+def prepopulate_settings():
+    """Prepopulate settings with provided credentials"""
+    try:
+        settings_obj = Settings.query.first()
+        if not settings_obj:
+            settings_obj = Settings()
+            db.session.add(settings_obj)
+        
+        # Prepopulate with the provided credentials
+        settings_obj.facebook_page_id = "534295833110036"
+        settings_obj.facebook_access_token = "EAAQrAsA1wosBPK5HVZBFUaNhrqJd2mQtv4Nmppm6f2LxlnCZCMaEfzASMncXpdcriUqWYO9bP21BEjkWHeZAHyjdYVhSivmYIpeNY2mBuv2vbQb97QHkOei5v5YE9TT8DUyy7VcynB4pqZAxs6vu2xOCrNn9NIwYsgBFmk3OsmwGwiYmiPI5BcWZBk0nUMp9cbOoXorgzJzPWJyZC9S05FdnTxFa4Fh24TCiqZAYCZAa8Xm9BAZDZD"
+        settings_obj.facebook_app_id = "1173190721520267"
+        settings_obj.facebook_app_secret = "f90fd5f582a74db3b857396e1b718a63"
+        settings_obj.openai_api_key = "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"
+        settings_obj.facebook_token_auto_renew = True
+        settings_obj.ai_enhancement_enabled = True
+        settings_obj.enabled = True
+        
+        db.session.commit()
+        logger.info("Settings prepopulated with provided credentials")
+        return jsonify({'success': True, 'message': 'Settings prepopulated successfully'})
+        
+    except Exception as e:
+        logger.error(f"Error prepopulating settings: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/check_token_status', methods=['GET'])
+def check_token_status():
+    """Check Facebook token status and expiry"""
+    try:
+        settings_obj = Settings.query.first()
+        if not settings_obj or not settings_obj.facebook_access_token:
+            return jsonify({'success': False, 'error': 'No token configured'})
+        
+        # Use token manager to validate token
+        token_info = token_manager.validate_token_and_get_info(settings_obj.facebook_access_token)
+        
+        if token_info['success']:
+            # Check if renewal is needed
+            renewal_check = token_manager.check_if_renewal_needed(settings_obj)
+            
+            return jsonify({
+                'success': True,
+                'token_valid': True,
+                'token_info': token_info,
+                'renewal_needed': renewal_check['renewal_needed'],
+                'renewal_reason': renewal_check['reason'],
+                'days_until_expiry': renewal_check.get('days_until_expiry'),
+                'auto_renew_enabled': settings_obj.facebook_token_auto_renew if hasattr(settings_obj, 'facebook_token_auto_renew') else False
+            })
+        else:
+            return jsonify({
+                'success': True,
+                'token_valid': False,
+                'error': token_info['error']
+            })
+            
+    except Exception as e:
+        logger.error(f"Error checking token status: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/posts')
 def api_posts():

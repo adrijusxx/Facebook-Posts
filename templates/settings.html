@@ -57,14 +57,58 @@
                                    value="{{ settings.facebook_access_token }}" placeholder="Your page access token">
                             <div class="form-text">
                                 Page access token with publish permissions. 
-                                <a href="https://developers.facebook.com/tools/explorer/" target="_blank">Get token here</a>
+                                <a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noopener noreferrer">Get token here</a>
                             </div>
                         </div>
                         
-                        <button type="button" class="btn btn-outline-primary btn-sm" onclick="testFacebookConnection()">
-                            <i class="fas fa-wifi"></i> Test Connection
-                        </button>
-                        <span id="facebookStatus"></span>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="facebook_app_id" class="form-label">Facebook App ID</label>
+                                    <input type="text" class="form-control" id="facebook_app_id" name="facebook_app_id" 
+                                           value="{{ settings.facebook_app_id }}" placeholder="1173190721520267">
+                                    <div class="form-text">Your Facebook App ID for token renewal</div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="facebook_app_secret" class="form-label">Facebook App Secret</label>
+                                    <input type="password" class="form-control" id="facebook_app_secret" name="facebook_app_secret" 
+                                           value="{{ settings.facebook_app_secret }}" placeholder="Your app secret">
+                                    <div class="form-text">Your Facebook App Secret for token renewal</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="facebook_token_auto_renew" name="facebook_token_auto_renew" 
+                                       {{ 'checked' if settings.facebook_token_auto_renew }}>
+                                <label class="form-check-label" for="facebook_token_auto_renew">
+                                    Enable Automatic Token Renewal
+                                </label>
+                                <div class="form-text">Automatically renew tokens every 50 days using App credentials</div>
+                            </div>
+                        </div>
+                        
+                        <div class="btn-group" role="group">
+                            <button type="button" class="btn btn-outline-primary btn-sm" onclick="testFacebookConnection()">
+                                <i class="fas fa-wifi"></i> Test Connection
+                            </button>
+                            <button type="button" class="btn btn-outline-warning btn-sm" onclick="refreshFacebookToken()">
+                                <i class="fas fa-sync"></i> Refresh Token
+                            </button>
+                            <button type="button" class="btn btn-outline-info btn-sm" onclick="prepopulateSettings()">
+                                <i class="fas fa-magic"></i> Prepopulate Settings
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="checkTokenStatus()">
+                                <i class="fas fa-clock"></i> Token Status
+                            </button>
+                        </div>
+                        <div class="mt-2">
+                            <div id="tokenStatus" class="mb-2"></div>
+                            <span id="facebookStatus"></span>
+                        </div>
                     </div>
                     
                     <!-- AI Enhancement Settings -->
@@ -161,6 +205,29 @@
             </div>
         </div>
         
+        <!-- Helpful Links -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h6><i class="fas fa-external-link-alt"></i> Helpful Links</h6>
+            </div>
+            <div class="card-body">
+                <div class="d-grid gap-2">
+                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="openUrl('https://developers.facebook.com/tools/explorer/')">
+                        <i class="fab fa-facebook"></i> Facebook Graph API Explorer
+                    </button>
+                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="openUrl('https://platform.openai.com/api-keys')">
+                        <i class="fas fa-robot"></i> OpenAI API Keys
+                    </button>
+                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="openUrl('https://developers.facebook.com/docs/pages/access-tokens')">
+                        <i class="fas fa-key"></i> Facebook Page Access Tokens
+                    </button>
+                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="openUrl('https://developers.facebook.com/apps/')">
+                        <i class="fas fa-cog"></i> Facebook App Dashboard
+                    </button>
+                </div>
+            </div>
+        </div>
+        
         <!-- Quick Stats -->
         <div class="card">
             <div class="card-header">
@@ -228,8 +295,10 @@
                                 <tr>
                                     <td>{{ source.name }}</td>
                                     <td>
-                                        <a href="{{ source.url }}" target="_blank" class="text-decoration-none">
+                                        <a href="{{ source.url }}" target="_blank" rel="noopener noreferrer" class="text-decoration-none" 
+                                           onclick="openUrl('{{ source.url }}'); return false;">
                                             {{ source.url[:50] }}{% if source.url|length > 50 %}...{% endif %}
+                                            <i class="fas fa-external-link-alt ms-1 text-muted"></i>
                                         </a>
                                     </td>
                                     <td>
@@ -565,10 +634,173 @@ function validateRSSUrl() {
     });
 }
 
+// Function to refresh Facebook token
+function refreshFacebookToken() {
+    const button = event.target.closest('button');
+    const originalText = button.innerHTML;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Refreshing...';
+    button.disabled = true;
+    
+    fetch('/refresh_facebook_token', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showAlert('Facebook token refreshed successfully!', 'success');
+            // Optionally refresh the page to show updated token
+            setTimeout(() => {
+                location.reload();
+            }, 1500);
+        } else {
+            showAlert('Failed to refresh token: ' + data.error, 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Error refreshing token:', error);
+        showAlert('Error refreshing token: ' + error.message, 'danger');
+    })
+    .finally(() => {
+        button.innerHTML = originalText;
+        button.disabled = false;
+    });
+}
+
+// Function to prepopulate settings
+function prepopulateSettings() {
+    const button = event.target.closest('button');
+    const originalText = button.innerHTML;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading...';
+    button.disabled = true;
+    
+    fetch('/prepopulate_settings', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showAlert('Settings prepopulated successfully!', 'success');
+            // Refresh the page to show updated values
+            setTimeout(() => {
+                location.reload();
+            }, 1500);
+        } else {
+            showAlert('Failed to prepopulate settings: ' + data.error, 'danger');
+        }
+    })
+    .catch(error => {
+        console.error('Error prepopulating settings:', error);
+        showAlert('Error prepopulating settings: ' + error.message, 'danger');
+    })
+    .finally(() => {
+        button.innerHTML = originalText;
+        button.disabled = false;
+    });
+}
+
+// Function to check token status
+function checkTokenStatus() {
+    const button = event.target.closest('button');
+    const originalText = button.innerHTML;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking...';
+    button.disabled = true;
+    
+    fetch('/check_token_status')
+    .then(response => response.json())
+    .then(data => {
+        const statusDiv = document.getElementById('tokenStatus');
+        
+        if (data.success && data.token_valid) {
+            const tokenInfo = data.token_info;
+            const renewalNeeded = data.renewal_needed;
+            const daysUntilExpiry = data.days_until_expiry;
+            
+            let statusClass = 'success';
+            let statusIcon = 'check-circle';
+            let statusMessage = 'Token is valid';
+            
+            if (renewalNeeded) {
+                statusClass = 'warning';
+                statusIcon = 'exclamation-triangle';
+                statusMessage = `Token renewal recommended (${daysUntilExpiry} days remaining)`;
+            }
+            
+            statusDiv.innerHTML = `
+                <div class="alert alert-${statusClass} alert-sm">
+                    <i class="fas fa-${statusIcon}"></i> <strong>Token Status:</strong> ${statusMessage}
+                    ${tokenInfo.expiry_date ? `<br><small>Expires: ${new Date(tokenInfo.expiry_date).toLocaleDateString()}</small>` : ''}
+                    ${data.auto_renew_enabled ? '<br><small><i class="fas fa-magic"></i> Auto-renewal enabled</small>' : ''}
+                </div>
+            `;
+        } else if (data.success && !data.token_valid) {
+            statusDiv.innerHTML = `
+                <div class="alert alert-danger alert-sm">
+                    <i class="fas fa-times-circle"></i> <strong>Token Invalid:</strong> ${data.error}
+                </div>
+            `;
+        } else {
+            statusDiv.innerHTML = `
+                <div class="alert alert-warning alert-sm">
+                    <i class="fas fa-exclamation-triangle"></i> <strong>Status Check Failed:</strong> ${data.error}
+                </div>
+            `;
+        }
+    })
+    .catch(error => {
+        console.error('Error checking token status:', error);
+        document.getElementById('tokenStatus').innerHTML = `
+            <div class="alert alert-danger alert-sm">
+                <i class="fas fa-exclamation-triangle"></i> Error checking token status: ${error.message}
+            </div>
+        `;
+    })
+    .finally(() => {
+        button.innerHTML = originalText;
+        button.disabled = false;
+    });
+}
+
+// Function to open URLs with proper security
+function openUrl(url) {
+    window.open(url, '_blank', 'noopener,noreferrer');
+}
+
 // Update setup guide when form values change
 document.getElementById('facebook_page_id').addEventListener('input', updateSetupGuide);
 document.getElementById('facebook_access_token').addEventListener('input', updateSetupGuide);
 document.getElementById('openai_api_key').addEventListener('input', updateSetupGuide);
 document.getElementById('enabled').addEventListener('change', updateSetupGuide);
+
+// Auto-check token status on page load if token exists
+document.addEventListener('DOMContentLoaded', function() {
+    const tokenField = document.getElementById('facebook_access_token');
+    if (tokenField && tokenField.value.trim()) {
+        // Wait a bit for the page to fully load, then check token status
+        setTimeout(() => {
+            fetch('/check_token_status')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success && data.renewal_needed) {
+                    const statusDiv = document.getElementById('tokenStatus');
+                    statusDiv.innerHTML = `
+                        <div class="alert alert-warning alert-sm">
+                            <i class="fas fa-exclamation-triangle"></i> <strong>Notice:</strong> ${data.renewal_reason}
+                            ${data.auto_renew_enabled ? '<br><small><i class="fas fa-magic"></i> Auto-renewal is enabled</small>' : ''}
+                        </div>
+                    `;
+                }
+            })
+            .catch(error => {
+                console.log('Auto token check failed:', error);
+            });
+        }, 1000);
+    }
+});
 </script>
 {% endblock %}

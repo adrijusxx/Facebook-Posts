@@ -89,8 +89,50 @@ class FacebookPoster:
                     
                     # Check for token expiration errors
                     if error_code == 190 or 'expired' in error_message.lower():
-                        error_msg = f"Facebook access token has expired. Please update your token in settings. Error: {error_message}"
+                        error_msg = f"Facebook access token has expired. Error: {error_message}"
                         logger.warning(error_msg)
+                        
+                        # Try to automatically refresh the token if token manager is available
+                        if self.token_manager:
+                            logger.info("Attempting automatic token refresh due to expiration...")
+                            try:
+                                renewal_result = self.token_manager.auto_renew_token_if_needed()
+                                if renewal_result['success'] and renewal_result.get('renewed', False):
+                                    logger.info("Token refreshed successfully, retrying post...")
+                                    # Refresh settings and retry the post
+                                    db.session.refresh(settings)
+                                    post_data['access_token'] = settings.facebook_access_token
+                                    
+                                    # Retry the post with new token
+                                    retry_response = requests.post(endpoint, data=post_data, timeout=30)
+                                    if retry_response.status_code == 200:
+                                        response_data = retry_response.json()
+                                        facebook_post_id = response_data.get('id')
+                                        
+                                        post.facebook_post_id = facebook_post_id
+                                        post.status = 'posted'
+                                        post.posted_at = datetime.now(timezone.utc)
+                                        db.session.commit()
+                                        
+                                        self._log_action('post', f"Successfully posted after token refresh: {post.title}", post.id)
+                                        logger.info(f"Successfully posted to Facebook after token refresh: {post.title}")
+                                        
+                                        return {
+                                            'success': True, 
+                                            'facebook_post_id': facebook_post_id,
+                                            'message': 'Post published successfully after token refresh'
+                                        }
+                                    else:
+                                        error_msg += " Token refresh attempted but posting still failed."
+                                        logger.error(f"Post failed even after token refresh: {retry_response.text}")
+                                else:
+                                    error_msg += f" Automatic token refresh failed: {renewal_result.get('error', 'Unknown error')}"
+                                    logger.error(f"Automatic token refresh failed: {renewal_result}")
+                            except Exception as refresh_error:
+                                error_msg += f" Token refresh error: {str(refresh_error)}"
+                                logger.error(f"Error during automatic token refresh: {refresh_error}")
+                        else:
+                            error_msg += " Please update your token in settings."
                     else:
                         error_msg = f"Facebook API error ({error_code}): {error_message}"
                         logger.error(error_msg)
