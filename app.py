@@ -45,13 +45,28 @@ logger = logging.getLogger(__name__)
 def index():
     """Dashboard view"""
     recent_posts = Post.query.order_by(Post.created_at.desc()).limit(10).all()
+    # Convert Post objects to dictionaries for JSON serialization
+    posts_data = [{
+        'id': post.id,
+        'title': post.title,
+        'content': post.content,
+        'url': post.url,
+        'image_url': post.image_url,
+        'facebook_post_id': post.facebook_post_id,
+        'status': post.status,
+        'source': post.source,
+        'created_at': post.created_at.isoformat() if post.created_at else None,
+        'posted_at': post.posted_at.isoformat() if post.posted_at else None,
+        'error_message': post.error_message
+    } for post in recent_posts]
+    
     settings = Settings.query.first()
     if not settings:
         settings = Settings()
         db.session.add(settings)
         db.session.commit()
     
-    return render_template('dashboard.html', posts=recent_posts, settings=settings)
+    return render_template('dashboard.html', posts=posts_data, settings=settings)
 
 @app.route('/settings', methods=['GET', 'POST'])
 def settings():
