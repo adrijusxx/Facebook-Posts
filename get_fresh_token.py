@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+"""
+Helper script to get a fresh Facebook token and set up the renewal system
+"""
+
+import sys
+from datetime import datetime
+
+def main():
+    print("Facebook Token Renewal System - Fresh Token Setup")
+    print("=" * 55)
+    print()
+    print("Your current token has expired (August 22, 2025).")
+    print("You need to get a fresh long-lived token from Facebook.")
+    print()
+    print("Here's how to get a new token:")
+    print()
+    print("1. Go to Facebook Graph API Explorer:")
+    print("   https://developers.facebook.com/tools/explorer/")
+    print()
+    print("2. Select your app: '1173190721520267'")
+    print()
+    print("3. Get a User Access Token with these permissions:")
+    print("   - pages_show_list")
+    print("   - pages_read_engagement") 
+    print("   - pages_manage_posts")
+    print("   - publish_to_groups")
+    print()
+    print("4. Click 'Generate Access Token' and authorize")
+    print()
+    print("5. Copy the short-lived token and exchange it for a long-lived one:")
+    print("   https://graph.facebook.com/oauth/access_token?")
+    print("   grant_type=fb_exchange_token&")
+    print("   client_id=1173190721520267&")
+    print("   client_secret=f90fd5f582a74db3b857396e1b718a63&")
+    print("   fb_exchange_token=YOUR_SHORT_LIVED_TOKEN")
+    print()
+    print("6. Get your page access token:")
+    print("   https://graph.facebook.com/me/accounts?access_token=YOUR_LONG_LIVED_TOKEN")
+    print()
+    print("7. Find your page (534295833110036) and copy its access_token")
+    print()
+    print("8. Once you have the fresh page token, run:")
+    print("   curl -X POST http://localhost:5000/api/token/setup \\")
+    print("     -H \"Content-Type: application/json\" \\")
+    print("     -d '{")
+    print("       \"page_id\": \"534295833110036\",")
+    print("       \"access_token\": \"YOUR_FRESH_PAGE_TOKEN\",")
+    print("       \"app_id\": \"1173190721520267\",")
+    print("       \"app_secret\": \"f90fd5f582a74db3b857396e1b718a63\"")
+    print("     }'")
+    print()
+    print("OR manually update the database:")
+    print(f"   python3 migrate_token_fields.py 534295833110036 YOUR_FRESH_TOKEN 1173190721520267 f90fd5f582a74db3b857396e1b718a63")
+    print()
+    print("=" * 55)
+    print("The system is ready - it just needs a fresh token!")
+
+if __name__ == '__main__':
+    main()
