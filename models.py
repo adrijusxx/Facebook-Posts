@@ -41,6 +41,13 @@ class Settings(db.Model):
     ai_post_style = db.Column(db.String(50), default='informative')  # informative, motivational, question, tip
     last_updated = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
+    # Facebook token management fields
+    facebook_app_id = db.Column(db.String(100), nullable=True)
+    facebook_app_secret = db.Column(db.Text, nullable=True)
+    facebook_token_expires_at = db.Column(db.DateTime, nullable=True)
+    facebook_token_last_renewed = db.Column(db.DateTime, nullable=True)
+    facebook_token_auto_renew = db.Column(db.Boolean, default=True)
+    
     def __repr__(self):
         return f'<Settings: {self.posts_per_day} posts/day>'
 

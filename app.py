@@ -17,6 +17,7 @@ import threading
 from news_fetcher import NewsFetcher
 from facebook_poster import FacebookPoster
 from ai_content_enhancer import AIContentEnhancer
+from facebook_token_manager import FacebookTokenManager
 from models import db, Post, Settings, NewsSource
 
 # Load environment variables
@@ -34,7 +35,8 @@ db.init_app(app)
 
 # Initialize components
 news_fetcher = NewsFetcher()
-facebook_poster = FacebookPoster()
+token_manager = FacebookTokenManager()
+facebook_poster = FacebookPoster(token_manager)
 ai_enhancer = AIContentEnhancer()
 
 # Configure logging
@@ -514,9 +516,87 @@ def api_health():
             'timestamp': datetime.now().isoformat()
         }), 500
 
+@app.route('/api/token/status')
+def api_token_status():
+    """Get current Facebook token status"""
+    try:
+        status = token_manager.get_token_status()
+        return jsonify(status)
+    except Exception as e:
+        logger.error(f"Error getting token status: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/token/renew', methods=['POST'])
+def api_token_renew():
+    """Manually renew Facebook token"""
+    try:
+        result = token_manager.auto_renew_token_if_needed()
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error renewing token: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/token/setup', methods=['POST'])
+def api_token_setup():
+    """Set up Facebook token manually"""
+    try:
+        data = request.get_json()
+        
+        required_fields = ['page_id', 'access_token', 'app_id', 'app_secret']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({
+                    'success': False,
+                    'error': f'Missing required field: {field}'
+                }), 400
+        
+        result = token_manager.manual_token_setup(
+            data['page_id'],
+            data['access_token'],
+            data['app_id'],
+            data['app_secret']
+        )
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"Error setting up token: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/token/validate', methods=['POST'])
+def api_token_validate():
+    """Validate a Facebook token"""
+    try:
+        data = request.get_json()
+        
+        if not data.get('access_token'):
+            return jsonify({
+                'success': False,
+                'error': 'Missing access_token field'
+            }), 400
+        
+        result = token_manager.validate_token_and_get_info(data['access_token'])
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"Error validating token: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 def run_scheduler():
     """Run the post scheduler in a separate thread"""
-    def job():
+    def posting_job():
         """Scheduled job to post content"""
         settings_obj = Settings.query.first()
         if not settings_obj or not settings_obj.enabled:
@@ -548,8 +628,31 @@ def run_scheduler():
         except Exception as e:
             logger.error(f"Scheduler error: {e}")
     
+    def token_renewal_job():
+        """Scheduled job to check and renew Facebook tokens"""
+        try:
+            settings_obj = Settings.query.first()
+            if not settings_obj:
+                return
+                
+            # Only attempt renewal if auto-renewal is enabled
+            if hasattr(settings_obj, 'facebook_token_auto_renew') and settings_obj.facebook_token_auto_renew:
+                result = token_manager.auto_renew_token_if_needed()
+                if result['success']:
+                    if result.get('renewed', False):
+                        logger.info(f"Token renewal: {result['message']}")
+                    # Don't log if no renewal was needed to avoid spam
+                else:
+                    logger.warning(f"Token renewal failed: {result['error']}")
+            
+        except Exception as e:
+            logger.error(f"Token renewal scheduler error: {e}")
+    
     # Schedule posts every hour, the job function will check if it should actually post
-    schedule.every().hour.do(job)
+    schedule.every().hour.do(posting_job)
+    
+    # Schedule token renewal check every 6 hours
+    schedule.every(6).hours.do(token_renewal_job)
     
     while True:
         schedule.run_pending()

@@ -13,8 +13,9 @@ logger = logging.getLogger(__name__)
 class FacebookPoster:
     """Handles posting to Facebook pages using Graph API"""
     
-    def __init__(self):
+    def __init__(self, token_manager=None):
         self.base_url = "https://graph.facebook.com/v18.0"
+        self.token_manager = token_manager
         
     def post_to_facebook(self, post):
         """Post content to Facebook page"""
@@ -26,6 +27,18 @@ class FacebookPoster:
         if not settings.facebook_access_token or not settings.facebook_page_id:
             logger.error("Facebook credentials not configured")
             return {'success': False, 'error': 'Facebook credentials not configured'}
+        
+        # Check and renew token if needed (and token manager is available)
+        if self.token_manager:
+            try:
+                renewal_result = self.token_manager.auto_renew_token_if_needed()
+                if renewal_result['success'] and renewal_result.get('renewed', False):
+                    logger.info("Token was renewed before posting")
+                    # Refresh settings to get updated token
+                    db.session.refresh(settings)
+            except Exception as e:
+                logger.warning(f"Token renewal check failed: {e}")
+                # Continue with posting attempt using current token
         
         try:
             # Prepare the post data
