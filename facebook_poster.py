@@ -66,8 +66,25 @@ class FacebookPoster:
                     'message': 'Post published successfully'
                 }
             else:
-                error_msg = f"Facebook API error: {response.status_code} - {response.text}"
-                logger.error(error_msg)
+                # Parse error response for better handling
+                try:
+                    error_data = response.json()
+                    error_info = error_data.get('error', {})
+                    error_code = error_info.get('code')
+                    error_type = error_info.get('type')
+                    error_message = error_info.get('message', 'Unknown error')
+                    
+                    # Check for token expiration errors
+                    if error_code == 190 or 'expired' in error_message.lower():
+                        error_msg = f"Facebook access token has expired. Please update your token in settings. Error: {error_message}"
+                        logger.warning(error_msg)
+                    else:
+                        error_msg = f"Facebook API error ({error_code}): {error_message}"
+                        logger.error(error_msg)
+                        
+                except:
+                    error_msg = f"Facebook API error: {response.status_code} - {response.text}"
+                    logger.error(error_msg)
                 
                 # Update post status
                 post.status = 'failed'
@@ -122,11 +139,81 @@ class FacebookPoster:
                     'page_id': page_data.get('id')
                 }
             else:
-                return {
-                    'success': False,
-                    'error': f"API error: {response.status_code} - {response.text}"
-                }
+                # Parse error response for better handling
+                try:
+                    error_data = response.json()
+                    error_info = error_data.get('error', {})
+                    error_code = error_info.get('code')
+                    error_message = error_info.get('message', 'Unknown error')
+                    
+                    if error_code == 190 or 'expired' in error_message.lower():
+                        return {
+                            'success': False,
+                            'error': f"Access token has expired: {error_message}"
+                        }
+                    else:
+                        return {
+                            'success': False,
+                            'error': f"API error ({error_code}): {error_message}"
+                        }
+                except:
+                    return {
+                        'success': False,
+                        'error': f"API error: {response.status_code} - {response.text}"
+                    }
                 
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f"Connection error: {str(e)}"
+            }
+    
+    def check_token_validity(self, access_token):
+        """Check if the access token is still valid"""
+        try:
+            endpoint = f"{self.base_url}/me"
+            params = {
+                'fields': 'id,name',
+                'access_token': access_token
+            }
+            
+            response = requests.get(endpoint, params=params, timeout=10)
+            
+            if response.status_code == 200:
+                user_data = response.json()
+                return {
+                    'success': True,
+                    'valid': True,
+                    'user_id': user_data.get('id'),
+                    'user_name': user_data.get('name')
+                }
+            else:
+                try:
+                    error_data = response.json()
+                    error_info = error_data.get('error', {})
+                    error_code = error_info.get('code')
+                    error_message = error_info.get('message', 'Unknown error')
+                    
+                    if error_code == 190:
+                        return {
+                            'success': True,
+                            'valid': False,
+                            'reason': 'Token expired',
+                            'message': error_message
+                        }
+                    else:
+                        return {
+                            'success': True,
+                            'valid': False,
+                            'reason': f'API error ({error_code})',
+                            'message': error_message
+                        }
+                except:
+                    return {
+                        'success': False,
+                        'error': f"Could not parse error response: {response.text}"
+                    }
+                    
         except Exception as e:
             return {
                 'success': False,

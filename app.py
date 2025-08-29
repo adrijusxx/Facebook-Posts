@@ -197,7 +197,7 @@ def api_post_single():
         if not post_id:
             return jsonify({'success': False, 'error': 'Post ID is required'}), 400
         
-        post = Post.query.get(post_id)
+        post = db.session.get(Post, post_id)
         if not post:
             return jsonify({'success': False, 'error': 'Post not found'}), 404
         
@@ -224,6 +224,38 @@ def api_test_openai():
     
     result = ai_enhancer.test_openai_connection(api_key)
     return jsonify(result)
+
+@app.route('/api/test_facebook_token', methods=['POST'])
+def api_test_facebook_token():
+    """Test Facebook access token validity"""
+    try:
+        access_token = request.json.get('access_token')
+        if not access_token:
+            return jsonify({'success': False, 'error': 'Access token required'}), 400
+        
+        result = facebook_poster.check_token_validity(access_token)
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"Error testing Facebook token: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/verify_facebook_page', methods=['POST'])
+def api_verify_facebook_page():
+    """Verify Facebook page access"""
+    try:
+        page_id = request.json.get('page_id')
+        access_token = request.json.get('access_token')
+        
+        if not page_id or not access_token:
+            return jsonify({'success': False, 'error': 'Page ID and access token required'}), 400
+        
+        result = facebook_poster.verify_facebook_credentials(page_id, access_token)
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"Error verifying Facebook page: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/generate_custom_post', methods=['POST'])
 def api_generate_custom_post():
@@ -373,12 +405,59 @@ def api_validate_rss():
         logger.error(f"Error validating RSS feed: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/source_health', methods=['GET'])
+def api_source_health():
+    """Get health status of all news sources"""
+    try:
+        health_data = news_fetcher._get_source_health_status()
+        
+        # Calculate overall health summary
+        total_sources = len(health_data)
+        healthy_sources = sum(1 for s in health_data if s.get('status') == 'healthy')
+        warning_sources = sum(1 for s in health_data if s.get('status') == 'warning')
+        critical_sources = sum(1 for s in health_data if s.get('status') == 'critical')
+        enabled_sources = sum(1 for s in health_data if s.get('enabled'))
+        
+        summary = {
+            'total_sources': total_sources,
+            'enabled_sources': enabled_sources,
+            'healthy_sources': healthy_sources,
+            'warning_sources': warning_sources,
+            'critical_sources': critical_sources,
+            'overall_status': 'healthy' if critical_sources == 0 and warning_sources < 2 else ('warning' if critical_sources == 0 else 'critical')
+        }
+        
+        return jsonify({
+            'success': True,
+            'summary': summary,
+            'sources': health_data
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting source health: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/recover_sources', methods=['POST'])
+def api_recover_sources():
+    """Manually trigger source recovery process"""
+    try:
+        news_fetcher.auto_recover_sources()
+        return jsonify({
+            'success': True,
+            'message': 'Source recovery process completed'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in source recovery: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/health')
 def api_health():
     """Health check endpoint"""
     try:
         # Check database connection
-        db.session.execute('SELECT 1')
+        from sqlalchemy import text
+        db.session.execute(text('SELECT 1'))
         
         # Get basic stats
         total_posts = Post.query.count()
@@ -397,6 +476,17 @@ def api_health():
             'created_at': post.created_at.isoformat() if post.created_at else None
         } for post in recent_posts]
         
+        # Get source health summary
+        try:
+            health_data = news_fetcher._get_source_health_status()
+            critical_sources = sum(1 for s in health_data if s.get('status') == 'critical')
+            warning_sources = sum(1 for s in health_data if s.get('status') == 'warning')
+            source_health_status = 'healthy' if critical_sources == 0 and warning_sources < 2 else ('warning' if critical_sources == 0 else 'critical')
+        except:
+            source_health_status = 'unknown'
+            critical_sources = 0
+            warning_sources = 0
+        
         return jsonify({
             'status': 'healthy',
             'database': 'connected',
@@ -406,6 +496,11 @@ def api_health():
                 'posted_posts': posted_posts,
                 'total_sources': total_sources,
                 'enabled_sources': enabled_sources
+            },
+            'source_health': {
+                'status': source_health_status,
+                'critical_sources': critical_sources,
+                'warning_sources': warning_sources
             },
             'recent_activity': recent_activity,
             'timestamp': datetime.now().isoformat()
