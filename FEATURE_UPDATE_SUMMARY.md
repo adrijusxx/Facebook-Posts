@@ -42,14 +42,18 @@
 
 ## 🎯 **Prepopulated Credentials Ready**
 
-The following credentials are ready to be loaded via the "Prepopulate Settings" button:
+The credentials can be loaded via environment variables or the "Prepopulate Settings" button:
 
+```bash
+# Set environment variables (recommended for production)
+export FACEBOOK_PAGE_ID="your_page_id"
+export FACEBOOK_ACCESS_TOKEN="your_access_token"
+export FACEBOOK_APP_ID="your_app_id"  
+export FACEBOOK_APP_SECRET="your_app_secret"
+export OPENAI_API_KEY="your_openai_key"
 ```
-Facebook Page ID: 534295833110036
-Facebook App ID: 1173190721520267  
-Facebook App Secret: f90fd5f582a74db3b857396e1b718a63
-OpenAI API Key: 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
-```
+
+Or use the "Prepopulate Settings" button in the web interface to enter them manually.
 
 ## 🚀 **Getting Started**
 

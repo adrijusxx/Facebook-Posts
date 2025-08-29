@@ -197,12 +197,12 @@ def prepopulate_settings():
             settings_obj = Settings()
             db.session.add(settings_obj)
         
-        # Prepopulate with the provided credentials
-        settings_obj.facebook_page_id = "534295833110036"
-        settings_obj.facebook_access_token = "EAAQrAsA1wosBPK5HVZBFUaNhrqJd2mQtv4Nmppm6f2LxlnCZCMaEfzASMncXpdcriUqWYO9bP21BEjkWHeZAHyjdYVhSivmYIpeNY2mBuv2vbQb97QHkOei5v5YE9TT8DUyy7VcynB4pqZAxs6vu2xOCrNn9NIwYsgBFmk3OsmwGwiYmiPI5BcWZBk0nUMp9cbOoXorgzJzPWJyZC9S05FdnTxFa4Fh24TCiqZAYCZAa8Xm9BAZDZD"
-        settings_obj.facebook_app_id = "1173190721520267"
-        settings_obj.facebook_app_secret = "f90fd5f582a74db3b857396e1b718a63"
-        settings_obj.openai_api_key = "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"
+        # Prepopulate with the provided credentials from environment variables
+        settings_obj.facebook_page_id = os.getenv('FACEBOOK_PAGE_ID', "534295833110036")
+        settings_obj.facebook_access_token = os.getenv('FACEBOOK_ACCESS_TOKEN', "")
+        settings_obj.facebook_app_id = os.getenv('FACEBOOK_APP_ID', "1173190721520267") 
+        settings_obj.facebook_app_secret = os.getenv('FACEBOOK_APP_SECRET', "")
+        settings_obj.openai_api_key = os.getenv('OPENAI_API_KEY', "")
         settings_obj.facebook_token_auto_renew = True
         settings_obj.ai_enhancement_enabled = True
         settings_obj.enabled = True
