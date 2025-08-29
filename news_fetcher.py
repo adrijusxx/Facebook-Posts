@@ -42,6 +42,9 @@ class NewsFetcher:
         
         logger.info(f"Starting news fetch from {len(sources)} enabled sources")
         
+        # Try to auto-recover disabled sources before fetching
+        self.auto_recover_sources()
+        
         for source in sources:
             retry_count = 0
             source_articles = []
@@ -79,6 +82,11 @@ class NewsFetcher:
                         time.sleep(5)
                     else:
                         logger.warning(f"Failed to fetch from {source.name} after {max_retries + 1} attempts: {error_info['error_message']}")
+                        
+                        # Auto-disable sources with persistent errors (except temporary network issues)
+                        if error_info['error_type'] in ['access_denied', 'not_found']:
+                            self._consider_disabling_source(source, error_info)
+                        
                         # Continue with other sources instead of failing completely
                 
                 retry_count += 1
@@ -605,6 +613,103 @@ class NewsFetcher:
             'source_name': source.name,
             'attempt': attempt
         }
+    
+    def _consider_disabling_source(self, source, error_info):
+        """Consider disabling a news source based on error patterns"""
+        try:
+            # Check if this source has been failing consistently
+            from sqlalchemy import text
+            
+            # Count recent errors for this source
+            recent_errors = db.session.execute(
+                text("""
+                SELECT COUNT(*) FROM posting_logs 
+                WHERE message LIKE :pattern 
+                AND timestamp > datetime('now', '-7 days')
+                """),
+                {'pattern': f'%{source.name}%error%'}
+            ).scalar()
+            
+            # If we have many recent errors and this is a persistent issue, disable the source
+            if recent_errors >= 10 and error_info['error_type'] in ['access_denied', 'not_found']:
+                logger.warning(f"Disabling {source.name} due to persistent {error_info['error_type']} errors ({recent_errors} in last 7 days)")
+                source.enabled = False
+                self._log_action('disable', f"Auto-disabled {source.name} due to persistent {error_info['error_type']} errors")
+                
+        except Exception as e:
+            logger.error(f"Error checking source failure history: {e}")
+    
+    def _get_source_health_status(self):
+        """Get health status of all news sources"""
+        sources = NewsSource.query.all()
+        health_data = []
+        
+        for source in sources:
+            try:
+                # Get recent error count
+                from sqlalchemy import text
+                recent_errors = db.session.execute(
+                    text("""
+                    SELECT COUNT(*) FROM posting_logs 
+                    WHERE message LIKE :pattern 
+                    AND timestamp > datetime('now', '-24 hours')
+                    """),
+                    {'pattern': f'%{source.name}%error%'}
+                ).scalar()
+                
+                # Calculate success rate
+                success_rate = 100.0
+                if source.total_articles_fetched > 0:
+                    success_rate = max(0, 100 - (recent_errors * 10))  # Rough estimation
+                
+                health_data.append({
+                    'name': source.name,
+                    'enabled': source.enabled,
+                    'last_fetched': source.last_fetched.isoformat() if source.last_fetched else None,
+                    'total_articles': source.total_articles_fetched,
+                    'recent_errors': recent_errors,
+                    'success_rate': success_rate,
+                    'status': 'healthy' if recent_errors == 0 else ('warning' if recent_errors < 5 else 'critical')
+                })
+                
+            except Exception as e:
+                logger.error(f"Error getting health status for {source.name}: {e}")
+                health_data.append({
+                    'name': source.name,
+                    'enabled': source.enabled,
+                    'status': 'unknown',
+                    'error': str(e)
+                })
+        
+        return health_data
+    
+    def auto_recover_sources(self):
+        """Automatically re-enable sources that might have recovered"""
+        try:
+            # Get disabled sources that were auto-disabled
+            from sqlalchemy import text
+            
+            # Find sources that were disabled due to errors but might have recovered
+            disabled_sources = NewsSource.query.filter_by(enabled=False).all()
+            
+            for source in disabled_sources:
+                # Check if it's been disabled for more than 24 hours
+                if source.last_fetched and (datetime.now(timezone.utc) - source.last_fetched).total_seconds() > 86400:
+                    # Test if the source is working now
+                    try:
+                        test_result = self.test_rss_source(source)
+                        if not test_result.get('error') and test_result.get('total_entries', 0) > 0:
+                            logger.info(f"Re-enabling {source.name} - appears to be working again")
+                            source.enabled = True
+                            self._log_action('enable', f"Auto-enabled {source.name} - source appears to be working again")
+                    except Exception as e:
+                        logger.debug(f"Source {source.name} still not working: {e}")
+                        
+            db.session.commit()
+            
+        except Exception as e:
+            logger.error(f"Error in auto-recovery process: {e}")
+            db.session.rollback()
 
     def validate_rss_feed(self, url):
         """Validate an RSS feed URL and return detailed information"""
