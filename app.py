@@ -6,7 +6,7 @@ Main Flask application for managing automated Facebook posts about USA trucking 
 
 import os
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from flask import Flask, render_template, request, jsonify, redirect, url_for, flash
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
@@ -149,8 +149,8 @@ def refresh_facebook_token():
         if not settings_obj:
             return jsonify({'success': False, 'error': 'No settings found'})
         
-        app_id = settings_obj.facebook_app_id
-        app_secret = settings_obj.facebook_app_secret
+        app_id = getattr(settings_obj, 'facebook_app_id', None)
+        app_secret = getattr(settings_obj, 'facebook_app_secret', None)
         current_token = settings_obj.facebook_access_token
         page_id = settings_obj.facebook_page_id
         

@@ -66,7 +66,7 @@
                                 <div class="mb-3">
                                     <label for="facebook_app_id" class="form-label">Facebook App ID</label>
                                     <input type="text" class="form-control" id="facebook_app_id" name="facebook_app_id" 
-                                           value="{{ settings.facebook_app_id }}" placeholder="1173190721520267">
+                                           value="{{ settings.facebook_app_id or '' }}" placeholder="1173190721520267">
                                     <div class="form-text">Your Facebook App ID for token renewal</div>
                                 </div>
                             </div>
@@ -74,7 +74,7 @@
                                 <div class="mb-3">
                                     <label for="facebook_app_secret" class="form-label">Facebook App Secret</label>
                                     <input type="password" class="form-control" id="facebook_app_secret" name="facebook_app_secret" 
-                                           value="{{ settings.facebook_app_secret }}" placeholder="Your app secret">
+                                           value="{{ settings.facebook_app_secret or '' }}" placeholder="Your app secret">
                                     <div class="form-text">Your Facebook App Secret for token renewal</div>
                                 </div>
                             </div>
@@ -83,7 +83,7 @@
                         <div class="mb-3">
                             <div class="form-check">
                                 <input class="form-check-input" type="checkbox" id="facebook_token_auto_renew" name="facebook_token_auto_renew" 
-                                       {{ 'checked' if settings.facebook_token_auto_renew }}>
+                                       {{ 'checked' if settings.facebook_token_auto_renew else '' }}>
                                 <label class="form-check-label" for="facebook_token_auto_renew">
                                     Enable Automatic Token Renewal
                                 </label>
@@ -295,8 +295,7 @@
                                 <tr>
                                     <td>{{ source.name }}</td>
                                     <td>
-                                        <a href="{{ source.url }}" target="_blank" rel="noopener noreferrer" class="text-decoration-none" 
-                                           onclick="openUrl('{{ source.url }}'); return false;">
+                                        <a href="{{ source.url }}" target="_blank" rel="noopener noreferrer" class="text-decoration-none">
                                             {{ source.url[:50] }}{% if source.url|length > 50 %}...{% endif %}
                                             <i class="fas fa-external-link-alt ms-1 text-muted"></i>
                                         </a>
@@ -408,6 +407,30 @@ document.addEventListener('DOMContentLoaded', function() {
     var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
         return new bootstrap.Tooltip(tooltipTriggerEl);
     });
+    
+    // Auto-check token status if token exists
+    const tokenField = document.getElementById('facebook_access_token');
+    if (tokenField && tokenField.value.trim()) {
+        // Wait a bit for the page to fully load, then check token status
+        setTimeout(() => {
+            fetch('/check_token_status')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success && data.renewal_needed) {
+                    const statusDiv = document.getElementById('tokenStatus');
+                    statusDiv.innerHTML = `
+                        <div class="alert alert-warning alert-sm">
+                            <i class="fas fa-exclamation-triangle"></i> <strong>Notice:</strong> ${data.renewal_reason}
+                            ${data.auto_renew_enabled ? '<br><small><i class="fas fa-magic"></i> Auto-renewal is enabled</small>' : ''}
+                        </div>
+                    `;
+                }
+            })
+            .catch(error => {
+                console.log('Auto token check failed:', error);
+            });
+        }, 1000);
+    }
 });
 
 function updateSetupGuide() {
@@ -776,31 +799,5 @@ document.getElementById('facebook_page_id').addEventListener('input', updateSetu
 document.getElementById('facebook_access_token').addEventListener('input', updateSetupGuide);
 document.getElementById('openai_api_key').addEventListener('input', updateSetupGuide);
 document.getElementById('enabled').addEventListener('change', updateSetupGuide);
-
-// Auto-check token status on page load if token exists
-document.addEventListener('DOMContentLoaded', function() {
-    const tokenField = document.getElementById('facebook_access_token');
-    if (tokenField && tokenField.value.trim()) {
-        // Wait a bit for the page to fully load, then check token status
-        setTimeout(() => {
-            fetch('/check_token_status')
-            .then(response => response.json())
-            .then(data => {
-                if (data.success && data.renewal_needed) {
-                    const statusDiv = document.getElementById('tokenStatus');
-                    statusDiv.innerHTML = `
-                        <div class="alert alert-warning alert-sm">
-                            <i class="fas fa-exclamation-triangle"></i> <strong>Notice:</strong> ${data.renewal_reason}
-                            ${data.auto_renew_enabled ? '<br><small><i class="fas fa-magic"></i> Auto-renewal is enabled</small>' : ''}
-                        </div>
-                    `;
-                }
-            })
-            .catch(error => {
-                console.log('Auto token check failed:', error);
-            });
-        }, 1000);
-    }
-});
 </script>
 {% endblock %}
