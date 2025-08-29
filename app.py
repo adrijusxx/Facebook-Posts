@@ -670,6 +670,7 @@ with app.app_context():
             NewsSource(name="Fleet Owner", url="https://www.fleetowner.com/rss.xml", type="rss", enabled=True),
             NewsSource(name="Commercial Carrier Journal", url="https://www.ccjdigital.com/feed/", type="rss", enabled=True),
             NewsSource(name="Overdrive Magazine", url="https://www.overdriveonline.com/feed/", type="rss", enabled=True),
+            NewsSource(name="FreightWaves", url="https://www.freightwaves.com/feed", type="rss", enabled=True),
             # Add some alternative sources that might be more reliable
             NewsSource(name="Truck News", url="https://www.trucknews.com/feed/", type="rss", enabled=True),
             NewsSource(name="Trucking.com", url="https://www.trucking.com/feed/", type="rss", enabled=True),
