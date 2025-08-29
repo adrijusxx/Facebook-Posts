@@ -182,11 +182,11 @@
                                     </td>
                                     <td>{{ post.source or 'Unknown' }}</td>
                                     <td>
-                                        <small>{{ post.created_at.strftime('%m/%d %H:%M') }}</small>
+                                        <small class="date-display" data-date="{{ post.created_at }}">{{ post.created_at }}</small>
                                     </td>
                                     <td>
                                         {% if post.posted_at %}
-                                            <small>{{ post.posted_at.strftime('%m/%d %H:%M') }}</small>
+                                            <small class="date-display" data-date="{{ post.posted_at }}">{{ post.posted_at }}</small>
                                         {% else %}
                                             <small class="text-muted">Not posted</small>
                                         {% endif %}
@@ -254,6 +254,7 @@
 // Load dashboard statistics
 document.addEventListener('DOMContentLoaded', function() {
     loadDashboardStats();
+    formatDates();
     
     // Initialize tooltips
     var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
@@ -261,6 +262,29 @@ document.addEventListener('DOMContentLoaded', function() {
         return new bootstrap.Tooltip(tooltipTriggerEl);
     });
 });
+
+function formatDates() {
+    // Format all date displays
+    document.querySelectorAll('.date-display').forEach(function(element) {
+        const dateString = element.getAttribute('data-date');
+        if (dateString && dateString !== 'None') {
+            try {
+                const date = new Date(dateString);
+                if (!isNaN(date.getTime())) {
+                    element.textContent = date.toLocaleDateString('en-US', {
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: false
+                    });
+                }
+            } catch (e) {
+                console.error('Error formatting date:', dateString, e);
+            }
+        }
+    });
+}
 
 function loadDashboardStats() {
     fetch('/api/posts')
