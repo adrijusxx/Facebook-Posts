@@ -40,36 +40,39 @@ def get_long_lived_token(app_id, app_secret, short_lived_token):
             'error': f"Error: {str(e)}"
         }
 
-def get_page_access_token(user_access_token, page_id):
-    """Get page access token using user access token"""
+def get_page_access_token_direct(user_access_token, page_id):
+    """Get page access token directly using the page ID"""
     try:
-        url = "https://graph.facebook.com/v18.0/me/accounts"
+        url = f"https://graph.facebook.com/v18.0/{page_id}"
         params = {
-            'access_token': user_access_token
+            'access_token': user_access_token,
+            'fields': 'id,name,access_token'
         }
         
         response = requests.get(url, params=params, timeout=30)
         if response.status_code == 200:
             data = response.json()
-            pages = data.get('data', [])
+            page_token = data.get('access_token')
+            page_name = data.get('name')
             
-            for page in pages:
-                if page.get('id') == page_id:
-                    return {
-                        'success': True,
-                        'access_token': page.get('access_token'),
-                        'page_name': page.get('name')
-                    }
-            
-            return {
-                'success': False,
-                'error': f"Page {page_id} not found in accessible pages"
-            }
+            if page_token:
+                return {
+                    'success': True,
+                    'access_token': page_token,
+                    'page_name': page_name,
+                    'page_id': data.get('id')
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': 'No access token found for this page'
+                }
         else:
             return {
                 'success': False,
-                'error': f"Failed to get pages: {response.status_code} - {response.text}"
+                'error': f"Failed to get page info: {response.status_code} - {response.text}"
             }
+            
     except Exception as e:
         return {
             'success': False,
@@ -168,7 +171,7 @@ def main():
     print("\nStep 3: Get page access token")
     print("-" * 40)
     
-    page_token_result = get_page_access_token(long_lived_token, PAGE_ID)
+    page_token_result = get_page_access_token_direct(long_lived_token, PAGE_ID)
     
     if not page_token_result['success']:
         print(f"❌ Failed to get page access token: {page_token_result['error']}")

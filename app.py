@@ -6,19 +6,24 @@ Main Flask application for managing automated Facebook posts about USA trucking 
 
 import os
 import logging
-from datetime import datetime, timedelta
-from flask import Flask, render_template, request, jsonify, redirect, url_for, flash
+import json
+import time
+from datetime import datetime, timedelta, timezone
+from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, session
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
+from flask_socketio import SocketIO, emit
+from flask_caching import Cache
 from dotenv import load_dotenv
 import schedule
-import time
 import threading
 from news_fetcher import NewsFetcher
 from facebook_poster import FacebookPoster
 from ai_content_enhancer import AIContentEnhancer
 from facebook_token_manager import FacebookTokenManager
-from models import db, Post, Settings, NewsSource
+from models import db, Post, Settings, NewsSource, OperationLog, Profile
+from werkzeug.exceptions import HTTPException
+import traceback
 
 # Load environment variables
 load_dotenv()
@@ -26,71 +31,604 @@ load_dotenv()
 # Initialize Flask app
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'your-secret-key-here')
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///trucking_news.db')
+
+# Database configuration with connection pooling
+database_url = os.getenv('DATABASE_URL', 'sqlite:///trucking_news.db')
+if database_url.startswith('postgresql://'):
+    # PostgreSQL with connection pooling
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        'pool_size': 10,
+        'pool_recycle': 300,
+        'pool_pre_ping': True,
+        'max_overflow': 20
+    }
+else:
+    # SQLite fallback
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SQLALCHEMY_RECORD_QUERIES'] = False  # Disable query recording for performance
 
 # Initialize extensions
 CORS(app)
 db.init_app(app)
 
-# Initialize components
-news_fetcher = NewsFetcher()
-token_manager = FacebookTokenManager()
-facebook_poster = FacebookPoster(token_manager)
-ai_enhancer = AIContentEnhancer()
+# Initialize cache for performance
+cache = Cache(app, config={
+    'CACHE_TYPE': 'simple',
+    'CACHE_DEFAULT_TIMEOUT': 300,  # 5 minutes
+    'CACHE_THRESHOLD': 1000  # Max number of items
+})
 
-# Configure logging
+socketio = SocketIO(app, cors_allowed_origins="*")
+
+# Configure logging first
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Global operation tracking
+active_operations = {}
+operation_counter = 0
+current_profile_id = None  # Track current active profile
+
+class OperationTracker:
+    """Tracks operations and provides real-time updates"""
+    
+    def __init__(self, operation_id, operation_type, description, profile_id=None):
+        self.operation_id = operation_id
+        self.operation_type = operation_type
+        self.description = description
+        self.profile_id = profile_id
+        self.start_time = datetime.now()
+        self.status = "running"
+        self.progress = 0
+        self.current_step = ""
+        self.total_steps = 0
+        self.completed_steps = 0
+        self.error_message = None
+        self.result = None
+        
+    def update_progress(self, progress, current_step, completed_steps=None, total_steps=None):
+        """Update operation progress"""
+        self.progress = progress
+        self.current_step = current_step
+        if completed_steps is not None:
+            self.completed_steps = completed_steps
+        if total_steps is not None:
+            self.total_steps = total_steps
+            
+        # Emit real-time update
+        socketio.emit('operation_update', {
+            'operation_id': self.operation_id,
+            'progress': self.progress,
+            'current_step': self.current_step,
+            'completed_steps': self.completed_steps,
+            'total_steps': self.total_steps,
+            'status': self.status,
+            'profile_id': self.profile_id
+        })
+        
+    def complete(self, result=None, error_message=None):
+        """Mark operation as complete"""
+        self.status = "completed" if error_message is None else "failed"
+        self.result = result
+        self.error_message = error_message
+        self.progress = 100 if error_message is None else 0
+        
+        # Log operation
+        self._log_operation()
+        
+        # Emit completion update
+        socketio.emit('operation_complete', {
+            'operation_id': self.operation_id,
+            'status': self.status,
+            'result': self.result,
+            'error_message': self.error_message,
+            'duration': (datetime.now() - self.start_time).total_seconds(),
+            'profile_id': self.profile_id
+        })
+        
+        # Clean up
+        if self.operation_id in active_operations:
+            del active_operations[self.operation_id]
+    
+    def _log_operation(self):
+        """Log operation to database"""
+        try:
+            log_entry = OperationLog(
+                operation_id=self.operation_id,
+                operation_type=self.operation_type,
+                description=self.description,
+                status=self.status,
+                start_time=self.start_time,
+                end_time=datetime.now(),
+                duration=(datetime.now() - self.start_time).total_seconds(),
+                progress=self.progress,
+                error_message=self.error_message,
+                result=json.dumps(self.result) if self.result else None,
+                profile_id=self.profile_id
+            )
+            db.session.add(log_entry)
+            db.session.commit()
+        except Exception as e:
+            logger.error(f"Error logging operation: {e}")
+
+def create_operation(operation_type, description, profile_id=None):
+    """Create a new operation tracker"""
+    global operation_counter
+    operation_counter += 1
+    operation_id = f"op_{operation_counter}_{int(time.time())}"
+    
+    tracker = OperationTracker(operation_id, operation_type, description, profile_id)
+    active_operations[operation_id] = tracker
+    
+    # Emit operation start
+    socketio.emit('operation_start', {
+        'operation_id': operation_id,
+        'operation_type': operation_type,
+        'description': description,
+        'start_time': tracker.start_time.isoformat(),
+        'profile_id': profile_id
+    })
+    
+    return tracker
+
+def get_current_profile():
+    """Get the currently active profile"""
+    global current_profile_id
+    
+    if current_profile_id is None:
+        # Try to get from session or default profile
+        profile = Profile.query.filter_by(is_default=True).first()
+        if profile:
+            current_profile_id = profile.id
+        else:
+            # Create default profile if none exists
+            profile = create_default_profile()
+            current_profile_id = profile.id
+    
+    return Profile.query.get(current_profile_id)
+
+def get_cached_current_profile():
+    """Get the currently active profile from cache"""
+    if 'current_profile_id' in session:
+        profile_id = session['current_profile_id']
+        return Profile.query.get(profile_id).to_dict() if profile_id else None
+    return None
+
+def get_cached_profiles():
+    """Get all profiles from cache"""
+    if 'all_profiles' in session:
+        return session['all_profiles']
+    return {}
+
+def create_default_profile():
+    """Create a default profile for backward compatibility"""
+    try:
+        # Check if we have old settings to migrate
+        old_settings = Settings.query.first()
+        
+        default_profile = Profile(
+            name='default',
+            display_name='Main Trucking Page',
+            description='Default Facebook page for trucking news',
+            primary_color='#3B82F6',
+            secondary_color='#1E40AF',
+            background_color='#F8FAFC',
+            accent_color='#F59E0B',
+            icon='🚛',
+            is_default=True
+        )
+        
+        # Migrate old settings if they exist
+        if old_settings:
+            # Try to get old settings from the old model structure
+            # This is a simplified migration - in production you'd want more robust handling
+            pass
+        
+        db.session.add(default_profile)
+        db.session.commit()
+        logger.info("Created default profile")
+        return default_profile
+        
+    except Exception as e:
+        logger.error(f"Error creating default profile: {e}")
+        # Create minimal profile
+        default_profile = Profile(
+            name='default',
+            display_name='Main Trucking Page',
+            is_default=True
+        )
+        db.session.add(default_profile)
+        db.session.commit()
+        return default_profile
+
+# Initialize components with error handling
+try:
+    news_fetcher = NewsFetcher()
+    token_manager = FacebookTokenManager()
+    facebook_poster = FacebookPoster(token_manager)
+    ai_enhancer = AIContentEnhancer()
+    logger.info("All components initialized successfully")
+except Exception as e:
+    logger.error(f"Error initializing components: {e}")
+    # Initialize with None to prevent crashes
+    news_fetcher = None
+    token_manager = None
+    facebook_poster = None
+    ai_enhancer = None
+
+# Initialize database and defaults
+with app.app_context():
+    try:
+        db.create_all()
+        
+        # Add default news sources if none exist
+        if not NewsSource.query.first():
+            default_sources = [
+                # Major Industry Publications
+                NewsSource(name="Transport Topics", url="https://ttnews.com/rss.xml", type="rss", enabled=True),
+                NewsSource(name="Trucking Info", url="https://www.truckinginfo.com/rss", type="rss", enabled=True),
+                NewsSource(name="Fleet Owner", url="https://www.fleetowner.com/rss/rss.xml", type="rss", enabled=True),
+                NewsSource(name="Truckers News", url="https://truckersnews.com/feed", type="rss", enabled=True),
+                NewsSource(name="Logistics Management", url="https://feeds.feedburner.com/logisticsmgmt/latest", type="rss", enabled=True),
+                
+                # Digital-First Sources
+                NewsSource(name="FreightWaves", url="https://feeds.feedburner.com/FreightWaves", type="rss", enabled=True),
+                NewsSource(name="DAT Blog", url="https://dat.com/blog/feed", type="rss", enabled=True),
+                NewsSource(name="Journal of Commerce", url="https://joc.com/rssfeed", type="rss", enabled=True),
+                NewsSource(name="Container News", url="https://container-news.com/feed", type="rss", enabled=True),
+                
+                # Government Sources
+                NewsSource(name="DOT News", url="https://www.transportation.gov/rss", type="rss", enabled=True),
+                
+                # Specialty/Regional Sources
+                NewsSource(name="Truck News Canada", url="https://trucknews.com/blogs/feed", type="rss", enabled=True),
+                NewsSource(name="Merchants Fleet", url="https://merchantsfleet.com/feed", type="rss", enabled=True),
+                
+                # Alternative Sources (as backups)
+                NewsSource(name="Commercial Carrier Journal", url="https://www.ccjdigital.com/feed/", type="rss", enabled=True),
+                NewsSource(name="Overdrive Magazine", url="https://www.overdriveonline.com/feed/", type="rss", enabled=True),
+            ]
+            for source in default_sources:
+                db.session.add(source)
+            db.session.commit()
+            logger.info(f"Added {len(default_sources)} default news sources")
+            
+            # Test RSS feeds in background to avoid blocking startup
+            def test_rss_feeds_async():
+                try:
+                    logger.info("Testing RSS feeds in background...")
+                    for source in default_sources:
+                        try:
+                            import feedparser
+                            feed = feedparser.parse(source.url)
+                            if feed.entries:
+                                logger.info(f"✓ {source.name}: {len(feed.entries)} entries found")
+                            else:
+                                logger.warning(f"✗ {source.name}: No entries found in RSS feed")
+                                # Try to disable sources that don't work
+                                source.enabled = False
+                                logger.info(f"Disabled {source.name} due to no entries")
+                        except Exception as e:
+                            logger.error(f"✗ {source.name}: Error testing RSS feed: {e}")
+                            # Disable problematic sources
+                            source.enabled = False
+                            logger.info(f"Disabled {source.name} due to error: {e}")
+                    
+                    # Commit the changes
+                    db.session.commit()
+                    logger.info("RSS feed testing completed in background")
+                except Exception as e:
+                    logger.error(f"Error in background RSS testing: {e}")
+            
+            # Start RSS testing in background thread
+            import threading
+            rss_thread = threading.Thread(target=test_rss_feeds_async, daemon=True)
+            rss_thread.start()
+            logger.info("RSS feed testing started in background thread")
+        else:
+            logger.info("Default news sources already exist, skipping addition.")
+    except Exception as e:
+        logger.error(f"Error initializing database or default data: {e}")
+
+# Start scheduler in background thread (only if not in serverless environment)
+def start_scheduler():
+    """Start the background scheduler for automated tasks"""
+    try:
+        while True:
+            schedule.run_pending()
+            time.sleep(60)  # Check every minute
+    except Exception as e:
+        logger.error(f"Scheduler error: {e}")
+
+# Start scheduler in background
+scheduler_thread = threading.Thread(target=start_scheduler, daemon=True)
+scheduler_thread.start()
+logger.info("Background scheduler started")
 
 @app.route('/')
 def index():
     """Dashboard view"""
-    recent_posts = Post.query.order_by(Post.created_at.desc()).limit(10).all()
-    # Convert Post objects to dictionaries for JSON serialization
-    posts_data = [{
-        'id': post.id,
-        'title': post.title,
-        'content': post.content,
-        'url': post.url,
-        'image_url': post.image_url,
-        'facebook_post_id': post.facebook_post_id,
-        'status': post.status,
-        'source': post.source,
-        'created_at': post.created_at.isoformat() if post.created_at else None,
-        'posted_at': post.posted_at.isoformat() if post.posted_at else None,
-        'error_message': post.error_message
-    } for post in recent_posts]
+    try:
+        # Use cached profiles for better performance
+        current_profile = get_cached_current_profile()
+        all_profiles = list(get_cached_profiles().values())
+        
+        if not current_profile:
+            # Fallback to database if cache fails
+            current_profile = get_current_profile()
+            if current_profile:
+                current_profile = current_profile.to_dict()
+                all_profiles = [profile.to_dict() for profile in Profile.query.all()]
+            else:
+                return f"""
+                <html>
+                <head><title>Service Starting</title></head>
+                <body>
+                    <h1>🚛 Facebook Trucking News Bot</h1>
+                    <p>The service is starting up. Please wait a moment and refresh the page.</p>
+                    <p>If this persists, check the service logs.</p>
+                </body>
+                </html>
+                """, 503
+        
+        # Get posts for current profile
+        recent_posts = Post.query.filter_by(profile_id=current_profile['id']).order_by(Post.created_at.desc()).limit(10).all()
+        posts_data = [{
+            'id': post.id,
+            'title': post.title,
+            'content': post.content,
+            'url': post.url,
+            'image_url': post.image_url,
+            'facebook_post_id': post.facebook_post_id,
+            'status': post.status,
+            'source': post.source,
+            'created_at': post.created_at.isoformat() if post.created_at else None,
+            'posted_at': post.posted_at.isoformat() if post.posted_at else None,
+            'error_message': post.error_message
+        } for post in recent_posts]
+        
+        # Get recent operation logs for current profile
+        recent_operations = OperationLog.query.filter_by(profile_id=current_profile['id']).order_by(OperationLog.start_time.desc()).limit(20).all()
+        operations_data = [{
+            'operation_id': op.operation_id,
+            'operation_type': op.operation_type,
+            'description': op.description,
+            'status': op.status,
+            'start_time': op.start_time.isoformat() if op.start_time else None,
+            'duration': op.duration,
+            'progress': op.progress,
+            'error_message': op.error_message
+        } for op in recent_operations]
+        
+        return render_template('dashboard.html', 
+                             posts=posts_data, 
+                             current_profile=current_profile,
+                             all_profiles=all_profiles,
+                             operations=operations_data,
+                             active_operations=len(active_operations))
+    except Exception as e:
+        logger.error(f"Error in index route: {e}")
+        return f"""
+        <html>
+        <head><title>Service Starting</title></head>
+        <body>
+            <h1>🚛 Facebook Trucking News Bot</h1>
+            <p>The service is starting up. Please wait a moment and refresh the page.</p>
+            <p>If this persists, check the service logs.</p>
+            <p>Error: {str(e)}</p>
+        </body>
+        </html>
+        """, 503
+
+@app.route('/profile/<int:profile_id>')
+def switch_profile(profile_id):
+    """Switch to a different profile"""
+    try:
+        global current_profile_id
+        profile = Profile.query.get_or_404(profile_id)
+        current_profile_id = profile_id
+        
+        # Store in session for persistence
+        session['current_profile_id'] = profile_id
+        
+        flash(f'Switched to profile: {profile.display_name}', 'success')
+        return redirect(url_for('index'))
+        
+    except Exception as e:
+        logger.error(f"Error switching profile: {e}")
+        flash(f'Error switching profile: {str(e)}', 'error')
+        return redirect(url_for('index'))
+
+@app.route('/profiles')
+def profiles():
+    """Profile management page"""
+    try:
+        all_profiles = Profile.query.all()
+        current_profile = get_current_profile()
+        
+        # Convert Profile objects to dictionaries for template rendering
+        current_profile_dict = current_profile.to_dict() if current_profile else None
+        all_profiles_dicts = [profile.to_dict() for profile in all_profiles] if all_profiles else []
+        
+        return render_template('profiles.html', profiles=all_profiles_dicts, current_profile=current_profile_dict, all_profiles=all_profiles_dicts)
+    except Exception as e:
+        logger.error(f"Error in profiles route: {e}")
+        flash(f'Error loading profiles: {str(e)}', 'error')
+        return redirect(url_for('index'))
+
+@app.route('/profiles/create', methods=['GET', 'POST'])
+def create_profile():
+    """Create a new profile"""
+    if request.method == 'POST':
+        try:
+            data = request.form
+            
+            # Generate unique name
+            base_name = data.get('name', '').lower().replace(' ', '_')
+            name = base_name
+            counter = 1
+            while Profile.query.filter_by(name=name).first():
+                name = f"{base_name}_{counter}"
+                counter += 1
+            
+            profile = Profile(
+                name=name,
+                display_name=data.get('display_name', ''),
+                description=data.get('description', ''),
+                primary_color=data.get('primary_color', '#3B82F6'),
+                secondary_color=data.get('secondary_color', '#1E40AF'),
+                background_color=data.get('background_color', '#F8FAFC'),
+                accent_color=data.get('accent_color', '#F59E0B'),
+                icon=data.get('icon', '🚛'),
+                facebook_page_id=data.get('facebook_page_id', ''),
+                facebook_page_name=data.get('facebook_page_name', ''),
+                facebook_access_token=data.get('facebook_access_token', ''),
+                openai_api_key=data.get('openai_api_key', ''),
+                ai_enhancement_enabled='ai_enhancement_enabled' in data,
+                ai_post_style=data.get('ai_post_style', 'informative'),
+                posts_per_day=int(data.get('posts_per_day', 3)),
+                posting_hours=data.get('posting_hours', '9,14,19'),
+                enabled='enabled' in data
+            )
+            
+            db.session.add(profile)
+            db.session.commit()
+            
+            flash(f'Profile "{profile.display_name}" created successfully!', 'success')
+            return redirect(url_for('profiles'))
+            
+        except Exception as e:
+            logger.error(f"Error creating profile: {e}")
+            flash(f'Error creating profile: {str(e)}', 'error')
     
-    settings = Settings.query.first()
-    if not settings:
-        settings = Settings()
-        db.session.add(settings)
+    current_profile_dict = get_current_profile().to_dict()
+    all_profiles = Profile.query.all()
+    all_profiles_dicts = [profile.to_dict() for profile in all_profiles]
+    return render_template('create_profile.html', current_profile=current_profile_dict, all_profiles=all_profiles_dicts)
+
+@app.route('/profiles/<int:profile_id>/edit', methods=['GET', 'POST'])
+def edit_profile(profile_id):
+    """Edit an existing profile"""
+    profile = Profile.query.get_or_404(profile_id)
+    
+    if request.method == 'POST':
+        try:
+            data = request.form
+            
+            profile.display_name = data.get('display_name', '')
+            profile.description = data.get('description', '')
+            profile.primary_color = data.get('primary_color', '#3B82F6')
+            profile.secondary_color = data.get('secondary_color', '#1E40AF')
+            profile.background_color = data.get('background_color', '#F8FAFC')
+            profile.accent_color = data.get('accent_color', '#F59E0B')
+            profile.icon = data.get('icon', '🚛')
+            profile.facebook_page_id = data.get('facebook_page_id', '')
+            profile.facebook_page_name = data.get('facebook_page_name', '')
+            profile.facebook_access_token = data.get('facebook_access_token', '')
+            profile.openai_api_key = data.get('openai_api_key', '')
+            profile.ai_enhancement_enabled = 'ai_enhancement_enabled' in data
+            profile.ai_post_style = data.get('ai_post_style', 'informative')
+            profile.posts_per_day = int(data.get('posts_per_day', 3))
+            profile.posting_hours = data.get('posting_hours', '9,14,19')
+            profile.enabled = 'enabled' in data
+            
+            db.session.commit()
+            
+            flash(f'Profile "{profile.display_name}" updated successfully!', 'success')
+            return redirect(url_for('profiles'))
+            
+        except Exception as e:
+            logger.error(f"Error updating profile: {e}")
+            flash(f'Error updating profile: {str(e)}', 'error')
+    
+    # Get current profile and all profiles for the base template
+    current_profile = get_current_profile()
+    all_profiles = Profile.query.all()
+    
+    # Convert Profile objects to dictionaries for template rendering
+    current_profile_dict = current_profile.to_dict() if current_profile else None
+    all_profiles_dicts = [profile.to_dict() for profile in all_profiles] if all_profiles else []
+    
+    return render_template('edit_profile.html', profile=profile, current_profile=current_profile_dict, all_profiles=all_profiles_dicts)
+
+@app.route('/profiles/<int:profile_id>/delete', methods=['POST'])
+def delete_profile(profile_id):
+    """Delete a profile"""
+    try:
+        profile = Profile.query.get_or_404(profile_id)
+        
+        if profile.is_default:
+            flash('Cannot delete the default profile', 'error')
+            return redirect(url_for('profiles'))
+        
+        # Check if profile has posts
+        post_count = Post.query.filter_by(profile_id=profile_id).count()
+        if post_count > 0:
+            flash(f'Cannot delete profile with {post_count} posts. Please reassign or delete posts first.', 'error')
+            return redirect(url_for('profiles'))
+        
+        db.session.delete(profile)
         db.session.commit()
-    
-    return render_template('dashboard.html', posts=posts_data, settings=settings)
+        
+        flash(f'Profile "{profile.display_name}" deleted successfully!', 'success')
+        return redirect(url_for('profiles'))
+        
+    except Exception as e:
+        logger.error(f"Error deleting profile: {e}")
+        flash(f'Error deleting profile: {str(e)}', 'error')
+        return redirect(url_for('profiles'))
+
+@app.route('/profiles/<int:profile_id>/set_default', methods=['POST'])
+def set_default_profile(profile_id):
+    """Set a profile as default"""
+    try:
+        # Remove default from all profiles
+        Profile.query.update({Profile.is_default: False})
+        
+        # Set new default
+        profile = Profile.query.get_or_404(profile_id)
+        profile.is_default = True
+        db.session.commit()
+        
+        flash(f'Profile "{profile.display_name}" set as default!', 'success')
+        return redirect(url_for('profiles'))
+        
+    except Exception as e:
+        logger.error(f"Error setting default profile: {e}")
+        flash(f'Error setting default profile: {str(e)}', 'error')
+        return redirect(url_for('profiles'))
 
 @app.route('/settings', methods=['GET', 'POST'])
 def settings():
-    """Settings management"""
+    """Global settings management"""
     if request.method == 'POST':
-        settings_obj = Settings.query.first()
-        if not settings_obj:
-            settings_obj = Settings()
-            db.session.add(settings_obj)
-        
-        settings_obj.posts_per_day = int(request.form.get('posts_per_day', 3))
-        settings_obj.facebook_page_id = request.form.get('facebook_page_id', '')
-        settings_obj.facebook_access_token = request.form.get('facebook_access_token', '')
-        settings_obj.posting_hours = request.form.get('posting_hours', '9,14,19')
-        settings_obj.enabled = 'enabled' in request.form
-        settings_obj.openai_api_key = request.form.get('openai_api_key', '')
-        settings_obj.ai_enhancement_enabled = 'ai_enhancement_enabled' in request.form
-        settings_obj.ai_post_style = request.form.get('ai_post_style', 'informative')
-        
-        db.session.commit()
-        flash('Settings updated successfully!', 'success')
-        return redirect(url_for('settings'))
+        try:
+            settings_obj = Settings.query.first()
+            if not settings_obj:
+                settings_obj = Settings()
+                db.session.add(settings_obj)
+            
+            settings_obj.app_name = request.form.get('app_name', 'Facebook Trucking News Bot')
+            settings_obj.app_theme = request.form.get('app_theme', 'light')
+            settings_obj.language = request.form.get('language', 'en')
+            settings_obj.timezone = request.form.get('timezone', 'UTC')
+            settings_obj.news_fetch_interval = int(request.form.get('news_fetch_interval', 60))
+            settings_obj.max_articles_per_fetch = int(request.form.get('max_articles_per_fetch', 100))
+            settings_obj.enable_auto_fetch = 'enable_auto_fetch' in request.form
+            settings_obj.enable_logging = 'enable_logging' in request.form
+            settings_obj.log_level = request.form.get('log_level', 'INFO')
+            settings_obj.enable_analytics = 'enable_analytics' in request.form
+            
+            db.session.commit()
+            flash('Global settings updated successfully!', 'success')
+            return redirect(url_for('settings'))
+        except Exception as e:
+            logger.error(f"Error updating global settings: {e}")
+            flash(f'Error updating global settings: {str(e)}', 'error')
+            return redirect(url_for('settings'))
     
     settings_obj = Settings.query.first()
     if not settings_obj:
@@ -98,414 +636,341 @@ def settings():
         db.session.add(settings_obj)
         db.session.commit()
     
-    news_sources = NewsSource.query.all()
-    return render_template('settings.html', settings=settings_obj, news_sources=news_sources)
+    # For now, pass empty profile data to avoid the error
+    return render_template('settings.html', settings=settings_obj, current_profile=None, all_profiles=[])
 
-@app.route('/news_sources', methods=['POST'])
+@app.route('/news_sources', methods=['GET'])
+def news_sources():
+    """Display and manage news sources"""
+    try:
+        sources = NewsSource.query.all()
+        current_profile = get_current_profile()
+        all_profiles = Profile.query.all()
+        return render_template('news_sources.html', sources=sources, current_profile=current_profile, all_profiles=all_profiles)
+    except Exception as e:
+        logger.error(f"Error loading news sources: {e}")
+        flash(f'Error loading news sources: {str(e)}', 'error')
+        return redirect(url_for('settings'))
+
+@app.route('/add_news_source', methods=['POST'])
 def add_news_source():
     """Add a new news source"""
-    url = request.form.get('url')
-    name = request.form.get('name')
-    source_type = request.form.get('type', 'rss')
-    
-    if url and name:
-        source = NewsSource(url=url, name=name, type=source_type, enabled=True)
-        db.session.add(source)
+    try:
+        name = request.form.get('name')
+        url = request.form.get('url')
+        source_type = request.form.get('type', 'rss')
+        
+        if not name or not url:
+            flash('Name and URL are required', 'error')
+            return redirect(url_for('news_sources'))
+        
+        # Check if source already exists
+        existing = NewsSource.query.filter_by(url=url).first()
+        if existing:
+            flash('A news source with this URL already exists', 'error')
+            return redirect(url_for('news_sources'))
+        
+        # Create new source
+        new_source = NewsSource(
+            name=name,
+            url=url,
+            type=source_type,
+            enabled=True
+        )
+        
+        db.session.add(new_source)
         db.session.commit()
-        flash('News source added successfully!', 'success')
-    else:
-        flash('Please provide both URL and name for the news source.', 'error')
-    
-    return redirect(url_for('settings'))
+        
+        flash(f'News source "{name}" added successfully!', 'success')
+        return redirect(url_for('news_sources'))
+        
+    except Exception as e:
+        logger.error(f"Error adding news source: {e}")
+        flash(f'Error adding news source: {str(e)}', 'error')
+        return redirect(url_for('news_sources'))
 
 @app.route('/news_sources/<int:source_id>/toggle', methods=['POST'])
 def toggle_news_source(source_id):
-    """Toggle news source enabled/disabled"""
-    source = NewsSource.query.get_or_404(source_id)
-    source.enabled = not source.enabled
-    db.session.commit()
-    
-    status = 'enabled' if source.enabled else 'disabled'
-    flash(f'News source {source.name} {status}!', 'success')
-    return redirect(url_for('settings'))
+    """Enable/disable a news source"""
+    try:
+        source = NewsSource.query.get_or_404(source_id)
+        source.enabled = not source.enabled
+        db.session.commit()
+        
+        status = "enabled" if source.enabled else "disabled"
+        flash(f'News source "{source.name}" {status}', 'success')
+        return redirect(url_for('news_sources'))
+        
+    except Exception as e:
+        logger.error(f"Error toggling news source: {e}")
+        flash(f'Error updating news source: {str(e)}', 'error')
+        return redirect(url_for('news_sources'))
 
 @app.route('/news_sources/<int:source_id>/delete', methods=['POST'])
 def delete_news_source(source_id):
     """Delete a news source"""
-    source = NewsSource.query.get_or_404(source_id)
-    db.session.delete(source)
-    db.session.commit()
-    flash(f'News source {source.name} deleted!', 'success')
-    return redirect(url_for('settings'))
-
-@app.route('/api/posts')
-def api_posts():
-    """API endpoint for posts"""
-    posts = Post.query.order_by(Post.created_at.desc()).limit(50).all()
-    return jsonify([{
-        'id': post.id,
-        'title': post.title,
-        'content': post.content,
-        'facebook_post_id': post.facebook_post_id,
-        'status': post.status,
-        'created_at': post.created_at.isoformat(),
-        'posted_at': post.posted_at.isoformat() if post.posted_at else None
-    } for post in posts])
-
-@app.route('/api/fetch_news', methods=['POST'])
-def api_fetch_news():
-    """Manually trigger news fetching"""
     try:
-        articles = news_fetcher.fetch_latest_news()
+        source = NewsSource.query.get_or_404(source_id)
+        name = source.name
+        db.session.delete(source)
+        db.session.commit()
+        
+        flash(f'News source "{name}" deleted successfully!', 'success')
+        return redirect(url_for('news_sources'))
+        
+    except Exception as e:
+        logger.error(f"Error deleting news source: {e}")
+        flash(f'Error deleting news source: {str(e)}', 'error')
+        return redirect(url_for('news_sources'))
+
+@app.route('/fetch_news', methods=['POST'])
+def fetch_news():
+    """Fetch news from all sources with progress tracking"""
+    try:
+        current_profile = get_current_profile()
+        
+        # Create operation tracker
+        tracker = create_operation("fetch_news", "Fetching news from all sources", current_profile.id)
+        
+        def fetch_news_async():
+            try:
+                if not news_fetcher:
+                    tracker.complete(error_message="News fetcher not initialized")
+                    return
+                
+                # Get enabled sources
+                sources = NewsSource.query.filter_by(enabled=True).all()
+                tracker.update_progress(0, f"Starting news fetch from {len(sources)} sources", 0, len(sources))
+                
+                articles = []
+                for i, source in enumerate(sources):
+                    try:
+                        tracker.update_progress(
+                            (i / len(sources)) * 100,
+                            f"Fetching from {source.name}",
+                            i,
+                            len(sources)
+                        )
+                        
+                        # Fetch articles from source
+                        if source.type == 'rss':
+                            source_articles = news_fetcher._fetch_from_rss(source)
+                        else:
+                            source_articles = news_fetcher._fetch_from_website(source)
+                        
+                        if source_articles:
+                            articles.extend(source_articles)
+                            source.last_fetched = datetime.now(timezone.utc)
+                            source.total_articles_fetched += len(source_articles)
+                            logger.info(f"Fetched {len(source_articles)} articles from {source.name}")
+                        
+                        # Small delay to avoid overwhelming sources
+                        time.sleep(1)
+                        
+                    except Exception as e:
+                        logger.error(f"Error fetching from {source.name}: {e}")
+                        continue
+                
+                # Process and save articles with profile association
+                tracker.update_progress(90, "Processing and saving articles", len(sources), len(sources))
+                if articles:
+                    # Associate articles with current profile
+                    for article in articles:
+                        if hasattr(article, 'profile_id'):
+                            article.profile_id = current_profile.id
+                    
+                    saved_articles = news_fetcher._process_and_save_articles(articles)
+                    tracker.complete(result=f"Successfully fetched and saved {len(saved_articles)} articles")
+                else:
+                    tracker.complete(result="No new articles found")
+                    
+            except Exception as e:
+                logger.error(f"Error in news fetch: {e}")
+                tracker.complete(error_message=str(e))
+        
+        # Start fetch in background thread
+        thread = threading.Thread(target=fetch_news_async, daemon=True)
+        thread.start()
+        
         return jsonify({
             'success': True,
-            'message': f'Fetched {len(articles)} articles',
-            'articles': articles[:5]  # Return first 5 for preview
+            'operation_id': tracker.operation_id,
+            'message': 'News fetch started'
         })
-    except Exception as e:
-        logger.error(f"Error fetching news: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/post_now', methods=['POST'])
-def api_post_now():
-    """Manually trigger a post"""
-    try:
-        # Get the latest unposted article
-        unposted = Post.query.filter_by(status='pending').first()
-        if not unposted:
-            # Fetch new articles if none pending
-            articles = news_fetcher.fetch_latest_news()
-            if articles:
-                unposted = Post.query.filter_by(status='pending').first()
         
-        if unposted:
-            result = facebook_poster.post_to_facebook(unposted)
-            if result['success']:
-                return jsonify({'success': True, 'message': 'Post published successfully!'})
-            else:
-                return jsonify({'success': False, 'error': result['error']}), 500
-        else:
-            return jsonify({'success': False, 'error': 'No articles available to post'}), 400
-            
     except Exception as e:
-        logger.error(f"Error posting: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        logger.error(f"Error starting news fetch: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
-@app.route('/api/post_single', methods=['POST'])
-def api_post_single():
-    """Post a single article by ID"""
+@app.route('/post_to_facebook', methods=['POST'])
+def post_to_facebook():
+    """Post selected news to Facebook with progress tracking"""
     try:
-        post_id = request.json.get('post_id')
+        post_id = request.form.get('post_id')
         if not post_id:
-            return jsonify({'success': False, 'error': 'Post ID is required'}), 400
+            return jsonify({'success': False, 'error': 'No post ID provided'}), 400
         
-        post = db.session.get(Post, post_id)
+        post = Post.query.get(post_id)
         if not post:
             return jsonify({'success': False, 'error': 'Post not found'}), 404
         
-        if post.status == 'posted':
-            return jsonify({'success': False, 'error': 'Post has already been published'}), 400
+        current_profile = get_current_profile()
         
-        # Post to Facebook
-        result = facebook_poster.post_to_facebook(post)
-        if result['success']:
-            return jsonify({'success': True, 'message': 'Post published successfully!'})
-        else:
-            return jsonify({'success': False, 'error': result['error']}), 500
-            
-    except Exception as e:
-        logger.error(f"Error posting single article: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/test_openai', methods=['POST'])
-def api_test_openai():
-    """Test OpenAI API connection"""
-    api_key = request.json.get('api_key')
-    if not api_key:
-        return jsonify({'success': False, 'error': 'API key required'}), 400
-    
-    result = ai_enhancer.test_openai_connection(api_key)
-    return jsonify(result)
-
-@app.route('/api/test_facebook_token', methods=['POST'])
-def api_test_facebook_token():
-    """Test Facebook access token validity"""
-    try:
-        access_token = request.json.get('access_token')
-        if not access_token:
-            return jsonify({'success': False, 'error': 'Access token required'}), 400
+        # Create operation tracker
+        tracker = create_operation("post_to_facebook", f"Posting '{post.title[:50]}...' to Facebook", current_profile.id)
         
-        result = facebook_poster.check_token_validity(access_token)
-        return jsonify(result)
+        def post_async():
+            try:
+                if not facebook_poster:
+                    tracker.complete(error_message="Facebook poster not initialized")
+                    return
+                
+                tracker.update_progress(20, "Preparing content for Facebook", 1, 4)
+                
+                # Use profile-specific settings
+                if current_profile.ai_enhancement_enabled and ai_enhancer:
+                    tracker.update_progress(40, "Enhancing content with AI", 2, 4)
+                    enhanced_content = ai_enhancer.enhance_content(post.content, current_profile.ai_post_style)
+                    post.content = enhanced_content
+                
+                tracker.update_progress(60, "Posting to Facebook", 3, 4)
+                
+                # Post to Facebook using profile credentials
+                result = facebook_poster.post_article(post, current_profile)
+                
+                if result.get('success'):
+                    post.status = 'posted'
+                    post.facebook_post_id = result.get('facebook_post_id')
+                    post.posted_at = datetime.now(timezone.utc)
+                    post.profile_id = current_profile.id
+                    db.session.commit()
+                    tracker.update_progress(100, "Posted successfully", 4, 4)
+                    tracker.complete(result=f"Posted to Facebook: {result.get('facebook_post_id')}")
+                else:
+                    post.status = 'failed'
+                    post.error_message = result.get('error', 'Unknown error')
+                    post.profile_id = current_profile.id
+                    db.session.commit()
+                    tracker.complete(error_message=result.get('error', 'Unknown error'))
+                    
+            except Exception as e:
+                logger.error(f"Error posting to Facebook: {e}")
+                post.status = 'failed'
+                post.error_message = str(e)
+                post.profile_id = current_profile.id
+                db.session.commit()
+                tracker.complete(error_message=str(e))
         
-    except Exception as e:
-        logger.error(f"Error testing Facebook token: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/verify_facebook_page', methods=['POST'])
-def api_verify_facebook_page():
-    """Verify Facebook page access"""
-    try:
-        page_id = request.json.get('page_id')
-        access_token = request.json.get('access_token')
+        # Start posting in background thread
+        thread = threading.Thread(target=post_async, daemon=True)
+        thread.start()
         
-        if not page_id or not access_token:
-            return jsonify({'success': False, 'error': 'Page ID and access token required'}), 400
-        
-        result = facebook_poster.verify_facebook_credentials(page_id, access_token)
-        return jsonify(result)
-        
-    except Exception as e:
-        logger.error(f"Error verifying Facebook page: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/generate_custom_post', methods=['POST'])
-def api_generate_custom_post():
-    """Generate a custom post using AI"""
-    try:
-        topic = request.json.get('topic')
-        style = request.json.get('style', 'informative')
-        
-        if not topic:
-            return jsonify({'success': False, 'error': 'Topic is required'}), 400
-        
-        content = ai_enhancer.generate_custom_post(topic, style)
-        
-        if content:
-            return jsonify({'success': True, 'content': content})
-        else:
-            return jsonify({'success': False, 'error': 'Failed to generate content'}), 500
-            
-    except Exception as e:
-        logger.error(f"Error generating custom post: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/content_suggestions', methods=['POST'])
-def api_content_suggestions():
-    """Get content suggestions based on keywords"""
-    try:
-        keywords = request.json.get('keywords', [])
-        if not keywords:
-            keywords = ['trucking', 'logistics', 'transportation']
-        
-        suggestions = ai_enhancer.get_content_suggestions(keywords)
-        return jsonify({'success': True, 'suggestions': suggestions})
+        return jsonify({
+            'success': True,
+            'operation_id': tracker.operation_id,
+            'message': 'Facebook posting started'
+        })
         
     except Exception as e:
-        logger.error(f"Error getting content suggestions: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        logger.error(f"Error starting Facebook post: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
-@app.route('/api/enhance_content', methods=['POST'])
-def api_enhance_content():
-    """Enhance existing content with AI"""
+@app.route('/api/profiles')
+def get_profiles():
+    """Get all profiles"""
     try:
-        title = request.json.get('title', '')
-        content = request.json.get('content', '')
-        url = request.json.get('url', '')
-        source = request.json.get('source', '')
-        
-        if not title and not content:
-            return jsonify({'success': False, 'error': 'Title or content required'}), 400
-        
-        enhanced = ai_enhancer.enhance_post_content(title, content, url, source)
-        return jsonify({'success': True, 'enhanced_content': enhanced})
-        
+        profiles = Profile.query.all()
+        return jsonify({
+            'success': True,
+            'profiles': [profile.to_dict() for profile in profiles],
+            'current_profile_id': current_profile_id
+        })
     except Exception as e:
-        logger.error(f"Error enhancing content: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        logger.error(f"Error getting profiles: {e}")
+        return jsonify({'error': str(e)}), 500
 
-@app.route('/api/test_rss/<int:source_id>', methods=['POST'])
-def api_test_rss(source_id):
-    """Test a specific RSS feed"""
+@app.route('/api/profiles/<int:profile_id>')
+def get_profile(profile_id):
+    """Get a specific profile"""
     try:
-        source = NewsSource.query.get_or_404(source_id)
-        
-        # Use the enhanced test method from NewsFetcher
-        result = news_fetcher.test_rss_source(source)
-        
-        if result.get('error'):
-            return jsonify({
-                'success': False,
-                'error': result['error'],
-                'details': result
-            }), 400
-        else:
-            return jsonify({
-                'success': True,
-                'message': f'RSS feed working: {result["total_entries"]} entries found, {result.get("trucking_entries", 0)} trucking-related',
-                'total_entries': result['total_entries'],
-                'trucking_entries': result.get('trucking_entries', 0),
-                'preview': result['entries_preview'],
-                'details': result
+        profile = Profile.query.get_or_404(profile_id)
+        return jsonify({
+            'success': True,
+            'profile': profile.to_dict()
+        })
+    except Exception as e:
+        logger.error(f"Error getting profile: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/operations')
+def get_operations():
+    """Get all operations (active and recent)"""
+    try:
+        # Get active operations
+        active_ops = []
+        for op_id, tracker in active_operations.items():
+            active_ops.append({
+                'operation_id': op_id,
+                'operation_type': tracker.operation_type,
+                'description': tracker.description,
+                'status': tracker.status,
+                'progress': tracker.progress,
+                'current_step': tracker.current_step,
+                'start_time': tracker.start_time.isoformat(),
+                'completed_steps': tracker.completed_steps,
+                'total_steps': tracker.total_steps,
+                'profile_id': tracker.profile_id
             })
-            
-    except Exception as e:
-        logger.error(f"Error testing RSS feed: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/test_all_rss', methods=['POST'])
-def api_test_all_rss():
-    """Test all RSS feeds at once"""
-    try:
-        sources = NewsSource.query.filter_by(enabled=True).all()
         
-        if not sources:
-            return jsonify({'success': False, 'error': 'No enabled news sources found'}), 400
-        
-        results = []
-        for source in sources:
-            if source.type == 'rss':
-                result = news_fetcher.test_rss_source(source)
-                results.append(result)
-        
-        # Summary
-        total_sources = len(results)
-        working_sources = sum(1 for r in results if not r.get('error'))
-        total_entries = sum(r.get('total_entries', 0) for r in results)
-        total_trucking_entries = sum(r.get('trucking_entries', 0) for r in results)
+        # Get recent completed operations
+        recent_ops = OperationLog.query.order_by(OperationLog.start_time.desc()).limit(50).all()
+        completed_ops = [{
+            'operation_id': op.operation_id,
+            'operation_type': op.operation_type,
+            'description': op.description,
+            'status': op.status,
+            'start_time': op.start_time.isoformat() if op.start_time else None,
+            'duration': op.duration,
+            'progress': op.progress,
+            'error_message': op.error_message,
+            'profile_id': op.profile_id
+        } for op in recent_ops]
         
         return jsonify({
-            'success': True,
-            'summary': {
-                'total_sources': total_sources,
-                'working_sources': working_sources,
-                'total_entries': total_entries,
-                'total_trucking_entries': total_trucking_entries
-            },
-            'results': results
+            'active_operations': active_ops,
+            'recent_operations': completed_ops
         })
         
     except Exception as e:
-        logger.error(f"Error testing all RSS feeds: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/validate_rss', methods=['POST'])
-def api_validate_rss():
-    """Validate an RSS feed URL"""
-    try:
-        data = request.json
-        if not data or 'url' not in data:
-            return jsonify({'success': False, 'error': 'URL is required'}), 400
-        
-        url = data['url']
-        validation_result = news_fetcher.validate_rss_feed(url)
-        
-        if validation_result['is_valid']:
-            return jsonify({
-                'success': True,
-                'message': f'RSS feed is valid: {validation_result["info"]["entry_count"]} entries found',
-                'validation': validation_result
-            })
-        else:
-            return jsonify({
-                'success': False,
-                'error': 'RSS feed validation failed',
-                'validation': validation_result
-            }), 400
-            
-    except Exception as e:
-        logger.error(f"Error validating RSS feed: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/source_health', methods=['GET'])
-def api_source_health():
-    """Get health status of all news sources"""
-    try:
-        health_data = news_fetcher._get_source_health_status()
-        
-        # Calculate overall health summary
-        total_sources = len(health_data)
-        healthy_sources = sum(1 for s in health_data if s.get('status') == 'healthy')
-        warning_sources = sum(1 for s in health_data if s.get('status') == 'warning')
-        critical_sources = sum(1 for s in health_data if s.get('status') == 'critical')
-        enabled_sources = sum(1 for s in health_data if s.get('enabled'))
-        
-        summary = {
-            'total_sources': total_sources,
-            'enabled_sources': enabled_sources,
-            'healthy_sources': healthy_sources,
-            'warning_sources': warning_sources,
-            'critical_sources': critical_sources,
-            'overall_status': 'healthy' if critical_sources == 0 and warning_sources < 2 else ('warning' if critical_sources == 0 else 'critical')
-        }
-        
-        return jsonify({
-            'success': True,
-            'summary': summary,
-            'sources': health_data
-        })
-        
-    except Exception as e:
-        logger.error(f"Error getting source health: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/recover_sources', methods=['POST'])
-def api_recover_sources():
-    """Manually trigger source recovery process"""
-    try:
-        news_fetcher.auto_recover_sources()
-        return jsonify({
-            'success': True,
-            'message': 'Source recovery process completed'
-        })
-        
-    except Exception as e:
-        logger.error(f"Error in source recovery: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        logger.error(f"Error getting operations: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/health')
-def api_health():
+def health_check():
     """Health check endpoint"""
     try:
         # Check database connection
-        from sqlalchemy import text
-        db.session.execute(text('SELECT 1'))
+        db.session.execute(db.text('SELECT 1'))
         
-        # Get basic stats
-        total_posts = Post.query.count()
-        pending_posts = Post.query.filter_by(status='pending').count()
-        posted_posts = Post.query.filter_by(status='posted').count()
-        
-        # Check news sources
-        total_sources = NewsSource.query.count()
-        enabled_sources = NewsSource.query.filter_by(enabled=True).count()
-        
-        # Get recent activity
-        recent_posts = Post.query.order_by(Post.created_at.desc()).limit(5).all()
-        recent_activity = [{
-            'title': post.title,
-            'status': post.status,
-            'created_at': post.created_at.isoformat() if post.created_at else None
-        } for post in recent_posts]
-        
-        # Get source health summary
-        try:
-            health_data = news_fetcher._get_source_health_status()
-            critical_sources = sum(1 for s in health_data if s.get('status') == 'critical')
-            warning_sources = sum(1 for s in health_data if s.get('status') == 'warning')
-            source_health_status = 'healthy' if critical_sources == 0 and warning_sources < 2 else ('warning' if critical_sources == 0 else 'critical')
-        except:
-            source_health_status = 'unknown'
-            critical_sources = 0
-            warning_sources = 0
+        # Check components
+        components_status = {
+            'news_fetcher': news_fetcher is not None,
+            'token_manager': token_manager is not None,
+            'facebook_poster': facebook_poster is not None,
+            'ai_enhancer': ai_enhancer is not None
+        }
         
         return jsonify({
             'status': 'healthy',
-            'database': 'connected',
-            'stats': {
-                'total_posts': total_posts,
-                'pending_posts': pending_posts,
-                'posted_posts': posted_posts,
-                'total_sources': total_sources,
-                'enabled_sources': enabled_sources
-            },
-            'source_health': {
-                'status': source_health_status,
-                'critical_sources': critical_sources,
-                'warning_sources': warning_sources
-            },
-            'recent_activity': recent_activity,
-            'timestamp': datetime.now().isoformat()
+            'timestamp': datetime.now().isoformat(),
+            'components': components_status,
+            'active_operations': len(active_operations)
         })
         
     except Exception as e:
@@ -516,197 +981,42 @@ def api_health():
             'timestamp': datetime.now().isoformat()
         }), 500
 
-@app.route('/api/token/status')
-def api_token_status():
-    """Get current Facebook token status"""
-    try:
-        status = token_manager.get_token_status()
-        return jsonify(status)
-    except Exception as e:
-        logger.error(f"Error getting token status: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+# WebSocket event handlers
+@socketio.on('connect')
+def handle_connect():
+    """Handle client connection"""
+    logger.info(f"Client connected: {request.sid}")
+    emit('connected', {'message': 'Connected to server'})
 
-@app.route('/api/token/renew', methods=['POST'])
-def api_token_renew():
-    """Manually renew Facebook token"""
-    try:
-        result = token_manager.auto_renew_token_if_needed()
-        return jsonify(result)
-    except Exception as e:
-        logger.error(f"Error renewing token: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+@socketio.on('disconnect')
+def handle_disconnect():
+    """Handle client disconnection"""
+    logger.info(f"Client disconnected: {request.sid}")
 
-@app.route('/api/token/setup', methods=['POST'])
-def api_token_setup():
-    """Set up Facebook token manually"""
-    try:
-        data = request.get_json()
-        
-        required_fields = ['page_id', 'access_token', 'app_id', 'app_secret']
-        for field in required_fields:
-            if not data.get(field):
-                return jsonify({
-                    'success': False,
-                    'error': f'Missing required field: {field}'
-                }), 400
-        
-        result = token_manager.manual_token_setup(
-            data['page_id'],
-            data['access_token'],
-            data['app_id'],
-            data['app_secret']
-        )
-        
-        return jsonify(result)
-        
-    except Exception as e:
-        logger.error(f"Error setting up token: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+@socketio.on('join_operations')
+def handle_join_operations():
+    """Handle client joining operations room"""
+    logger.info(f"Client joined operations room: {request.sid}")
 
-@app.route('/api/token/validate', methods=['POST'])
-def api_token_validate():
-    """Validate a Facebook token"""
-    try:
-        data = request.get_json()
-        
-        if not data.get('access_token'):
-            return jsonify({
-                'success': False,
-                'error': 'Missing access_token field'
-            }), 400
-        
-        result = token_manager.validate_token_and_get_info(data['access_token'])
-        return jsonify(result)
-        
-    except Exception as e:
-        logger.error(f"Error validating token: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+# Error handlers
+@app.errorhandler(HTTPException)
+def handle_http_error(error):
+    """Handle HTTP errors gracefully"""
+    logger.error(f"HTTP error: {error.code} - {error.description}")
+    return jsonify({
+        'error': error.description,
+        'code': error.code
+    }), error.code
 
-def run_scheduler():
-    """Run the post scheduler in a separate thread"""
-    def posting_job():
-        """Scheduled job to post content"""
-        settings_obj = Settings.query.first()
-        if not settings_obj or not settings_obj.enabled:
-            return
-        
-        try:
-            # Check if we should post now
-            current_hour = datetime.now().hour
-            posting_hours = [int(h.strip()) for h in settings_obj.posting_hours.split(',')]
-            
-            if current_hour in posting_hours:
-                # Check if we already posted this hour
-                last_post = Post.query.filter(
-                    Post.posted_at >= datetime.now().replace(minute=0, second=0, microsecond=0),
-                    Post.status == 'posted'
-                ).first()
-                
-                if not last_post:
-                    # Get pending post or fetch new content
-                    pending_post = Post.query.filter_by(status='pending').first()
-                    if not pending_post:
-                        news_fetcher.fetch_latest_news()
-                        pending_post = Post.query.filter_by(status='pending').first()
-                    
-                    if pending_post:
-                        facebook_poster.post_to_facebook(pending_post)
-                        logger.info(f"Automatically posted: {pending_post.title}")
-        
-        except Exception as e:
-            logger.error(f"Scheduler error: {e}")
-    
-    def token_renewal_job():
-        """Scheduled job to check and renew Facebook tokens"""
-        try:
-            settings_obj = Settings.query.first()
-            if not settings_obj:
-                return
-                
-            # Only attempt renewal if auto-renewal is enabled
-            if hasattr(settings_obj, 'facebook_token_auto_renew') and settings_obj.facebook_token_auto_renew:
-                result = token_manager.auto_renew_token_if_needed()
-                if result['success']:
-                    if result.get('renewed', False):
-                        logger.info(f"Token renewal: {result['message']}")
-                    # Don't log if no renewal was needed to avoid spam
-                else:
-                    logger.warning(f"Token renewal failed: {result['error']}")
-            
-        except Exception as e:
-            logger.error(f"Token renewal scheduler error: {e}")
-    
-    # Schedule posts every hour, the job function will check if it should actually post
-    schedule.every().hour.do(posting_job)
-    
-    # Schedule token renewal check every 6 hours
-    schedule.every(6).hours.do(token_renewal_job)
-    
-    while True:
-        schedule.run_pending()
-        time.sleep(60)  # Check every minute
-
-# Initialize database and defaults
-with app.app_context():
-    db.create_all()
-    
-    # Add default news sources if none exist
-    if not NewsSource.query.first():
-        default_sources = [
-            NewsSource(name="Transport Topics", url="https://www.ttnews.com/rss.xml", type="rss", enabled=True),
-            NewsSource(name="Trucking Info", url="https://www.truckinginfo.com/rss", type="rss", enabled=True),
-            NewsSource(name="Fleet Owner", url="https://www.fleetowner.com/rss.xml", type="rss", enabled=True),
-            NewsSource(name="Commercial Carrier Journal", url="https://www.ccjdigital.com/feed/", type="rss", enabled=True),
-            NewsSource(name="Overdrive Magazine", url="https://www.overdriveonline.com/feed/", type="rss", enabled=True),
-            # Add some alternative sources that might be more reliable
-            NewsSource(name="Truck News", url="https://www.trucknews.com/feed/", type="rss", enabled=True),
-            NewsSource(name="Trucking.com", url="https://www.trucking.com/feed/", type="rss", enabled=True),
-        ]
-        for source in default_sources:
-            db.session.add(source)
-        db.session.commit()
-        logger.info(f"Added {len(default_sources)} default news sources")
-        
-        # Test RSS feeds to see which ones are working
-        logger.info("Testing RSS feeds...")
-        for source in default_sources:
-            try:
-                import feedparser
-                feed = feedparser.parse(source.url)
-                if feed.entries:
-                    logger.info(f"✓ {source.name}: {len(feed.entries)} entries found")
-                else:
-                    logger.warning(f"✗ {source.name}: No entries found in RSS feed")
-                    # Try to disable sources that don't work
-                    source.enabled = False
-                    logger.info(f"Disabled {source.name} due to no entries")
-            except Exception as e:
-                logger.error(f"✗ {source.name}: Error testing RSS feed: {e}")
-                # Disable problematic sources
-                source.enabled = False
-                logger.info(f"Disabled {source.name} due to error: {e}")
-        
-        # Commit the changes
-        db.session.commit()
-
-# Start scheduler in background thread (only if not in serverless environment)
-if not os.getenv('GAE_ENV'):  # Not on App Engine
-    scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
-    scheduler_thread.start()
-    logger.info("Background scheduler started")
+@app.errorhandler(Exception)
+def handle_generic_error(error):
+    """Handle generic errors gracefully"""
+    logger.error(f"Generic error: {error}")
+    return jsonify({
+        'error': 'Internal server error',
+        'message': str(error)
+    }), 500
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    socketio.run(app, host='0.0.0.0', port=port, debug=False)

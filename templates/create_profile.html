@@ -1,0 +1,357 @@
+{% extends "base.html" %}
+
+{% block title %}Create New Profile{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto">
+    <!-- Header -->
+    <div class="mb-8">
+        <h1 class="text-3xl font-bold text-gray-900">Create New Profile</h1>
+        <p class="text-gray-600 mt-2">Set up a new Facebook page profile with custom settings and visual theme</p>
+    </div>
+
+    <form method="POST" class="space-y-8">
+        <!-- Basic Information -->
+        <div class="bg-white rounded-lg shadow-sm border p-6">
+            <h2 class="text-xl font-semibold text-gray-900 mb-4">Basic Information</h2>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label for="display_name" class="block text-sm font-medium text-gray-700 mb-2">
+                        Display Name *
+                    </label>
+                    <input type="text" 
+                           id="display_name" 
+                           name="display_name" 
+                           required
+                           placeholder="e.g., Main Trucking Page"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                    <p class="text-sm text-gray-500 mt-1">The name that will be displayed in the interface</p>
+                </div>
+                
+                <div>
+                    <label for="icon" class="block text-sm font-medium text-gray-700 mb-2">
+                        Icon/Emoji
+                    </label>
+                    <input type="text" 
+                           id="icon" 
+                           name="icon" 
+                           value="🚛"
+                           placeholder="🚛"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-center text-2xl">
+                    <p class="text-sm text-gray-500 mt-1">Choose an emoji or icon to represent this profile</p>
+                </div>
+            </div>
+            
+            <div class="mt-6">
+                <label for="description" class="block text-sm font-medium text-gray-700 mb-2">
+                    Description
+                </label>
+                <textarea id="description" 
+                          name="description" 
+                          rows="3"
+                          placeholder="Brief description of this profile and its purpose..."
+                          class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"></textarea>
+            </div>
+        </div>
+
+        <!-- Visual Theme -->
+        <div class="bg-white rounded-lg shadow-sm border p-6">
+            <h2 class="text-xl font-semibold text-gray-900 mb-4">Visual Theme</h2>
+            <p class="text-gray-600 mb-6">Customize the colors and appearance of this profile</p>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label for="primary_color" class="block text-sm font-medium text-gray-700 mb-2">
+                        Primary Color
+                    </label>
+                    <div class="flex items-center space-x-3">
+                        <input type="color" 
+                               id="primary_color" 
+                               name="primary_color" 
+                               value="#3B82F6"
+                               class="w-16 h-10 border border-gray-300 rounded-lg cursor-pointer">
+                        <input type="text" 
+                               value="#3B82F6"
+                               class="flex-1 px-3 py-2 border border-gray-300 rounded-lg font-mono text-sm"
+                               readonly>
+                    </div>
+                    <p class="text-sm text-gray-500 mt-1">Main color for buttons and highlights</p>
+                </div>
+                
+                <div>
+                    <label for="secondary_color" class="block text-sm font-medium text-gray-700 mb-2">
+                        Secondary Color
+                    </label>
+                    <div class="flex items-center space-x-3">
+                        <input type="color" 
+                               id="secondary_color" 
+                               name="secondary_color" 
+                               value="#1E40AF"
+                               class="w-16 h-10 border border-gray-300 rounded-lg cursor-pointer">
+                        <input type="text" 
+                               value="#1E40AF"
+                               class="flex-1 px-3 py-2 border border-gray-300 rounded-lg font-mono text-sm"
+                               readonly>
+                    </div>
+                    <p class="text-sm text-gray-500 mt-1">Secondary color for accents and borders</p>
+                </div>
+                
+                <div>
+                    <label for="accent_color" class="block text-sm font-medium text-gray-700 mb-2">
+                        Accent Color
+                    </label>
+                    <div class="flex items-center space-x-3">
+                        <input type="color" 
+                               id="accent_color" 
+                               name="accent_color" 
+                               value="#F59E0B"
+                               class="w-16 h-10 border border-gray-300 rounded-lg cursor-pointer">
+                        <input type="text" 
+                               value="#F59E0B"
+                               class="flex-1 px-3 py-2 border border-gray-300 rounded-lg font-mono text-sm"
+                               readonly>
+                    </div>
+                    <p class="text-sm text-gray-500 mt-1">Color for special elements and notifications</p>
+                </div>
+                
+                <div>
+                    <label for="background_color" class="block text-sm font-medium text-gray-700 mb-2">
+                        Background Color
+                    </label>
+                    <div class="flex items-center space-x-3">
+                        <input type="color" 
+                               id="background_color" 
+                               name="background_color" 
+                               value="#F8FAFC"
+                               class="w-16 h-10 border border-gray-300 rounded-lg cursor-pointer">
+                        <input type="text" 
+                               value="#F8FAFC"
+                               class="flex-1 px-3 py-2 border border-gray-300 rounded-lg font-mono text-sm"
+                               readonly>
+                    </div>
+                    <p class="text-sm text-gray-500 mt-1">Light background color for cards and sections</p>
+                </div>
+            </div>
+            
+            <!-- Color Preview -->
+            <div class="mt-6 p-4 border border-gray-200 rounded-lg bg-gray-50">
+                <p class="text-sm font-medium text-gray-700 mb-3">Theme Preview</p>
+                <div class="flex items-center space-x-4">
+                    <div class="flex items-center space-x-2">
+                        <div class="w-6 h-6 rounded border" id="preview-primary"></div>
+                        <span class="text-sm text-gray-600">Primary</span>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <div class="w-6 h-6 rounded border" id="preview-secondary"></div>
+                        <span class="text-sm text-gray-600">Secondary</span>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <div class="w-6 h-6 rounded border" id="preview-accent"></div>
+                        <span class="text-sm text-gray-600">Accent</span>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <div class="w-6 h-6 rounded border" id="preview-background"></div>
+                        <span class="text-sm text-gray-600">Background</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Facebook Configuration -->
+        <div class="bg-white rounded-lg shadow-sm border p-6">
+            <h2 class="text-xl font-semibold text-gray-900 mb-4">Facebook Configuration</h2>
+            <p class="text-gray-600 mb-6">Connect this profile to a Facebook page</p>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label for="facebook_page_id" class="block text-sm font-medium text-gray-700 mb-2">
+                        Facebook Page ID
+                    </label>
+                    <input type="text" 
+                           id="facebook_page_id" 
+                           name="facebook_page_id" 
+                           placeholder="e.g., 123456789012345"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                    <p class="text-sm text-gray-500 mt-1">The numeric ID of your Facebook page</p>
+                </div>
+                
+                <div>
+                    <label for="facebook_page_name" class="block text-sm font-medium text-gray-700 mb-2">
+                        Facebook Page Name
+                    </label>
+                    <input type="text" 
+                           id="facebook_page_name" 
+                           name="facebook_page_name" 
+                           placeholder="e.g., My Trucking Company"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                    <p class="text-sm text-gray-500 mt-1">The display name of your Facebook page</p>
+                </div>
+            </div>
+            
+            <div class="mt-6">
+                <label for="facebook_access_token" class="block text-sm font-medium text-gray-700 mb-2">
+                    Facebook Access Token
+                </label>
+                <input type="password" 
+                       id="facebook_access_token" 
+                       name="facebook_access_token" 
+                       placeholder="Enter your Facebook access token"
+                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                <p class="text-sm text-gray-500 mt-1">The access token for posting to this Facebook page</p>
+            </div>
+        </div>
+
+        <!-- AI Configuration -->
+        <div class="bg-white rounded-lg shadow-sm border p-6">
+            <h2 class="text-xl font-semibold text-gray-900 mb-4">AI Enhancement</h2>
+            <p class="text-gray-600 mb-6">Configure AI-powered content enhancement for this profile</p>
+            
+            <div class="space-y-4">
+                <div class="flex items-center">
+                    <input type="checkbox" 
+                           id="ai_enhancement_enabled" 
+                           name="ai_enhancement_enabled" 
+                           checked
+                           class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                    <label for="ai_enhancement_enabled" class="ml-2 block text-sm text-gray-900">
+                        Enable AI content enhancement
+                    </label>
+                </div>
+                
+                <div>
+                    <label for="ai_post_style" class="block text-sm font-medium text-gray-700 mb-2">
+                        AI Post Style
+                    </label>
+                    <select id="ai_post_style" 
+                            name="ai_post_style"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        <option value="informative">Informative - Factual and educational</option>
+                        <option value="motivational">Motivational - Inspiring and encouraging</option>
+                        <option value="question">Question - Engaging and discussion-provoking</option>
+                        <option value="tip">Tip - Practical advice and tips</option>
+                        <option value="industry_insight">Industry Insight - Professional analysis</option>
+                    </select>
+                    <p class="text-sm text-gray-500 mt-1">How AI should enhance your posts</p>
+                </div>
+                
+                <div>
+                    <label for="openai_api_key" class="block text-sm font-medium text-gray-700 mb-2">
+                        OpenAI API Key
+                    </label>
+                    <input type="password" 
+                           id="openai_api_key" 
+                           name="openai_api_key" 
+                           placeholder="Enter your OpenAI API key"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                    <p class="text-sm text-gray-500 mt-1">Required for AI content enhancement (can be set later)</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Posting Configuration -->
+        <div class="bg-white rounded-lg shadow-sm border p-6">
+            <h2 class="text-xl font-semibold text-gray-900 mb-4">Posting Configuration</h2>
+            <p class="text-gray-600 mb-6">Set up automated posting schedule for this profile</p>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label for="posts_per_day" class="block text-sm font-medium text-gray-700 mb-2">
+                        Posts Per Day
+                    </label>
+                    <input type="number" 
+                           id="posts_per_day" 
+                           name="posts_per_day" 
+                           value="3"
+                           min="1" 
+                           max="10"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                    <p class="text-sm text-gray-500 mt-1">Maximum number of posts to publish per day</p>
+                </div>
+                
+                <div>
+                    <label for="posting_hours" class="block text-sm font-medium text-gray-700 mb-2">
+                        Posting Hours
+                    </label>
+                    <input type="text" 
+                           id="posting_hours" 
+                           name="posting_hours" 
+                           value="9,14,19"
+                           placeholder="e.g., 9,14,19"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                    <p class="text-sm text-gray-500 mt-1">Hours when posts should be published (24-hour format, comma-separated)</p>
+                </div>
+            </div>
+            
+            <div class="mt-6">
+                <div class="flex items-center">
+                    <input type="checkbox" 
+                           id="enabled" 
+                           name="enabled" 
+                           checked
+                           class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                    <label for="enabled" class="ml-2 block text-sm text-gray-900">
+                        Enable this profile for automated posting
+                    </label>
+                </div>
+                <p class="text-sm text-gray-500 mt-1">When disabled, this profile won't post automatically</p>
+            </div>
+        </div>
+
+        <!-- Form Actions -->
+        <div class="flex items-center justify-between pt-6">
+            <a href="/profiles" 
+               class="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors">
+                Cancel
+            </a>
+            
+            <button type="submit" 
+                    class="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-lg font-medium transition-colors">
+                Create Profile
+            </button>
+        </div>
+    </form>
+</div>
+
+<!-- Color Picker JavaScript -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Color picker functionality
+    const colorInputs = document.querySelectorAll('input[type="color"]');
+    const textInputs = document.querySelectorAll('input[readonly]');
+    const previews = {
+        primary: document.getElementById('preview-primary'),
+        secondary: document.getElementById('preview-secondary'),
+        accent: document.getElementById('preview-accent'),
+        background: document.getElementById('preview-background')
+    };
+    
+    // Update text inputs and previews when colors change
+    colorInputs.forEach((input, index) => {
+        const textInput = textInputs[index];
+        const preview = Object.values(previews)[index];
+        
+        input.addEventListener('input', function() {
+            textInput.value = this.value;
+            preview.style.backgroundColor = this.value;
+        });
+        
+        // Initialize previews
+        preview.style.backgroundColor = input.value;
+    });
+    
+    // Update color inputs when text inputs change (for manual entry)
+    textInputs.forEach((input, index) => {
+        input.addEventListener('input', function() {
+            const colorInput = colorInputs[index];
+            const preview = Object.values(previews)[index];
+            
+            if (/^#[0-9A-F]{6}$/i.test(this.value)) {
+                colorInput.value = this.value;
+                preview.style.backgroundColor = this.value;
+            }
+        });
+    });
+});
+</script>
+{% endblock %}

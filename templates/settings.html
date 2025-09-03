@@ -3,572 +3,151 @@
 {% block title %}Settings - Facebook Trucking News Automation{% endblock %}
 
 {% block content %}
-<div class="row">
-    <div class="col-lg-8">
-        <div class="card">
-            <div class="card-header">
-                <h5><i class="fas fa-cog"></i> Automation Settings</h5>
-            </div>
-            <div class="card-body">
-                <form method="POST">
-                    <!-- General Settings -->
-                    <div class="mb-4">
-                        <h6 class="text-primary border-bottom pb-2">General Settings</h6>
-                        
-                        <div class="mb-3">
-                            <label for="posts_per_day" class="form-label">Posts per Day</label>
-                            <input type="number" class="form-control" id="posts_per_day" name="posts_per_day" 
-                                   value="{{ settings.posts_per_day }}" min="1" max="10">
-                            <div class="form-text">Number of posts to publish per day (1-10)</div>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label for="posting_hours" class="form-label">Posting Hours</label>
-                            <input type="text" class="form-control" id="posting_hours" name="posting_hours" 
-                                   value="{{ settings.posting_hours }}" placeholder="9,14,19">
-                            <div class="form-text">Hours to post content (24-hour format, comma-separated). Example: 9,14,19 for 9 AM, 2 PM, 7 PM</div>
-                        </div>
-                        
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="enabled" name="enabled" 
-                                   {{ 'checked' if settings.enabled }}>
-                            <label class="form-check-label" for="enabled">
-                                Enable Automatic Posting
-                            </label>
-                        </div>
-                    </div>
-                    
-                    <!-- Facebook Settings -->
-                    <div class="mb-4">
-                        <h6 class="text-primary border-bottom pb-2">
-                            <i class="fab fa-facebook"></i> Facebook Integration
-                        </h6>
-                        
-                        <div class="mb-3">
-                            <label for="facebook_page_id" class="form-label">Facebook Page ID</label>
-                            <input type="text" class="form-control" id="facebook_page_id" name="facebook_page_id" 
-                                   value="{{ settings.facebook_page_id }}" placeholder="123456789012345">
-                            <div class="form-text">Your Facebook page ID (numeric)</div>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label for="facebook_access_token" class="form-label">Facebook Access Token</label>
-                            <input type="password" class="form-control" id="facebook_access_token" name="facebook_access_token" 
-                                   value="{{ settings.facebook_access_token }}" placeholder="Your page access token">
-                            <div class="form-text">
-                                Page access token with publish permissions. 
-                                <a href="https://developers.facebook.com/tools/explorer/" target="_blank">Get token here</a>
-                            </div>
-                        </div>
-                        
-                        <button type="button" class="btn btn-outline-primary btn-sm" onclick="testFacebookConnection()">
-                            <i class="fas fa-wifi"></i> Test Connection
-                        </button>
-                        <span id="facebookStatus"></span>
-                    </div>
-                    
-                    <!-- AI Enhancement Settings -->
-                    <div class="mb-4">
-                        <h6 class="text-primary border-bottom pb-2">
-                            <i class="fas fa-robot"></i> AI Enhancement (OpenAI)
-                        </h6>
-                        
-                        <div class="mb-3">
-                            <label for="openai_api_key" class="form-label">OpenAI API Key</label>
-                            <input type="password" class="form-control" id="openai_api_key" name="openai_api_key" 
-                                   value="{{ settings.openai_api_key }}" placeholder="sk-...">
-                            <div class="form-text">
-                                Your OpenAI API key for generating engaging content. 
-                                <a href="https://platform.openai.com/api-keys" target="_blank">Get API key here</a>
-                            </div>
-                        </div>
-                        
-                        <div class="form-check mb-3">
-                            <input class="form-check-input" type="checkbox" id="ai_enhancement_enabled" name="ai_enhancement_enabled" 
-                                   {{ 'checked' if settings.ai_enhancement_enabled }}>
-                            <label class="form-check-label" for="ai_enhancement_enabled">
-                                Enable AI Content Enhancement
-                            </label>
-                            <div class="form-text">Use AI to make posts more engaging and professional</div>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label for="ai_post_style" class="form-label">AI Post Style</label>
-                            <select class="form-select" id="ai_post_style" name="ai_post_style">
-                                <option value="informative" {{ 'selected' if settings.ai_post_style == 'informative' }}>Informative</option>
-                                <option value="motivational" {{ 'selected' if settings.ai_post_style == 'motivational' }}>Motivational</option>
-                                <option value="question" {{ 'selected' if settings.ai_post_style == 'question' }}>Question/Discussion</option>
-                                <option value="tip" {{ 'selected' if settings.ai_post_style == 'tip' }}>Tips/Advice</option>
-                                <option value="industry_insight" {{ 'selected' if settings.ai_post_style == 'industry_insight' }}>Industry Insights</option>
-                            </select>
-                            <div class="form-text">Default style for AI-enhanced posts</div>
-                        </div>
-                        
-                        <button type="button" class="btn btn-outline-primary btn-sm" onclick="testOpenAIConnection()">
-                            <i class="fas fa-wifi"></i> Test Connection
-                        </button>
-                        <span id="openaiStatus"></span>
-                    </div>
-                    
-                    <div class="d-grid">
-                        <button type="submit" class="btn btn-primary btn-lg">
-                            <i class="fas fa-save"></i> Save Settings
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-    
-    <div class="col-lg-4">
-        <!-- Setup Guide -->
-        <div class="card mb-4">
-            <div class="card-header">
-                <h6><i class="fas fa-info-circle"></i> Setup Guide</h6>
-            </div>
-            <div class="card-body">
-                <div class="setup-step">
-                    <div class="d-flex align-items-center mb-2">
-                        <i class="fas fa-check-circle text-success me-2" id="step1-icon"></i>
-                        <span>1. Configure Facebook</span>
-                    </div>
-                    <small class="text-muted">Set up your Facebook page ID and access token</small>
-                </div>
-                
-                <div class="setup-step mt-3">
-                    <div class="d-flex align-items-center mb-2">
-                        <i class="fas fa-circle text-muted me-2" id="step2-icon"></i>
-                        <span>2. Add OpenAI API Key</span>
-                    </div>
-                    <small class="text-muted">Enable AI-powered engaging content</small>
-                </div>
-                
-                <div class="setup-step mt-3">
-                    <div class="d-flex align-items-center mb-2">
-                        <i class="fas fa-circle text-muted me-2" id="step3-icon"></i>
-                        <span>3. Configure News Sources</span>
-                    </div>
-                    <small class="text-muted">Add or modify news sources below</small>
-                </div>
-                
-                <div class="setup-step mt-3">
-                    <div class="d-flex align-items-center mb-2">
-                        <i class="fas fa-circle text-muted me-2" id="step4-icon"></i>
-                        <span>4. Enable Auto-posting</span>
-                    </div>
-                    <small class="text-muted">Turn on automatic posting schedule</small>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Quick Stats -->
-        <div class="card">
-            <div class="card-header">
-                <h6><i class="fas fa-chart-line"></i> Quick Stats</h6>
-            </div>
-            <div class="card-body">
-                <div class="row text-center">
-                    <div class="col-6">
-                        <h4 class="text-primary" id="totalPosts">-</h4>
-                        <small>Total Posts</small>
-                    </div>
-                    <div class="col-6">
-                        <h4 class="text-success" id="successRate">-</h4>
-                        <small>Success Rate</small>
-                    </div>
-                </div>
-                <hr>
-                <div class="row text-center">
-                    <div class="col-6">
-                        <h4 class="text-info" id="totalSources">{{ news_sources|length }}</h4>
-                        <small>News Sources</small>
-                    </div>
-                    <div class="col-6">
-                        <h4 class="text-warning" id="activeSources">{{ news_sources|selectattr('enabled')|list|length }}</h4>
-                        <small>Active Sources</small>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- News Sources -->
-<div class="row mt-4">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h5><i class="fas fa-rss"></i> News Sources</h5>
+<div class="min-h-screen bg-gray-50">
+    <!-- Header -->
+    <div class="bg-white shadow-sm border-b">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center py-6">
                 <div>
-                    <button type="button" class="btn btn-info btn-sm me-2" onclick="testAllRSS()">
-                        <i class="fas fa-wifi"></i> Test All RSS
-                    </button>
-                    <button type="button" class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#addSourceModal">
-                        <i class="fas fa-plus"></i> Add Source
+                    <h1 class="text-3xl font-bold text-gray-900">Settings</h1>
+                    <p class="mt-2 text-sm text-gray-600">Configure your automation settings and integrations</p>
+                </div>
+                <div class="flex space-x-3">
+                    <a href="{{ url_for('news_sources') }}" class="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z"></path>
+                        </svg>
+                        News Sources
+                    </a>
+                    <button type="submit" form="settingsForm" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                        </svg>
+                        Save Settings
                     </button>
                 </div>
             </div>
-            <div class="card-body">
-                {% if news_sources %}
-                    <div class="table-responsive">
-                        <table class="table table-hover">
-                            <thead>
-                                <tr>
-                                    <th>Name</th>
-                                    <th>URL</th>
-                                    <th>Type</th>
-                                    <th>Status</th>
-                                    <th>Last Fetched</th>
-                                    <th>Articles</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for source in news_sources %}
-                                <tr>
-                                    <td>{{ source.name }}</td>
-                                    <td>
-                                        <a href="{{ source.url }}" target="_blank" class="text-decoration-none">
-                                            {{ source.url[:50] }}{% if source.url|length > 50 %}...{% endif %}
-                                        </a>
-                                    </td>
-                                    <td>
-                                        <span class="badge bg-secondary">{{ source.type.upper() }}</span>
-                                    </td>
-                                    <td>
-                                        <span class="badge bg-{{ 'success' if source.enabled else 'danger' }}">
-                                            {{ 'Active' if source.enabled else 'Inactive' }}
-                                        </span>
-                                    </td>
-                                    <td>
-                                        {% if source.last_fetched %}
-                                            <small>{{ source.last_fetched.strftime('%m/%d %H:%M') }}</small>
-                                        {% else %}
-                                            <small class="text-muted">Never</small>
-                                        {% endif %}
-                                    </td>
-                                    <td>{{ source.total_articles_fetched }}</td>
-                                    <td>
-                                        <div class="btn-group btn-group-sm" role="group">
-                                            <button type="button" class="btn btn-outline-info" 
-                                                    onclick="testRSSFeed({{ source.id }})" 
-                                                    data-bs-toggle="tooltip" title="Test RSS Feed">
-                                                <i class="fas fa-wifi"></i>
-                                            </button>
-                                            <form method="POST" action="{{ url_for('toggle_news_source', source_id=source.id) }}" class="d-inline">
-                                                <button type="submit" class="btn btn-outline-{{ 'warning' if source.enabled else 'success' }}" 
-                                                        data-bs-toggle="tooltip" title="{{ 'Disable' if source.enabled else 'Enable' }}">
-                                                    <i class="fas {{ 'fa-pause' if source.enabled else 'fa-play' }}"></i>
-                                                </button>
-                                            </form>
-                                            <form method="POST" action="{{ url_for('delete_news_source', source_id=source.id) }}" 
-                                                  class="d-inline" onsubmit="return confirm('Are you sure you want to delete this source?')">
-                                                <button type="submit" class="btn btn-outline-danger" data-bs-toggle="tooltip" title="Delete">
-                                                    <i class="fas fa-trash"></i>
-                                                </button>
-                                            </form>
-                                        </div>
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                {% else %}
-                    <div class="text-center text-muted py-4">
-                        <i class="fas fa-rss fa-3x mb-3"></i>
-                        <p>No news sources configured. Add some sources to start fetching content!</p>
-                    </div>
-                {% endif %}
-            </div>
         </div>
     </div>
-</div>
 
-<!-- Add News Source Modal -->
-<div class="modal fade" id="addSourceModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Add News Source</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <form method="POST" action="{{ url_for('add_news_source') }}">
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <label for="sourceName" class="form-label">Name</label>
-                        <input type="text" class="form-control" id="sourceName" name="name" required>
-                    </div>
-                    <div class="mb-3">
-                        <label for="sourceUrl" class="form-label">URL</label>
-                        <div class="input-group">
-                            <input type="url" class="form-control" id="sourceUrl" name="url" required>
-                            <button type="button" class="btn btn-outline-info" onclick="validateRSSUrl()">
-                                <i class="fas fa-check"></i> Validate
-                            </button>
+    <!-- Content -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <form id="settingsForm" method="POST" class="space-y-8">
+            <!-- General Settings -->
+            <div class="bg-white shadow overflow-hidden sm:rounded-lg">
+                <div class="px-4 py-5 sm:px-6">
+                    <h3 class="text-lg leading-6 font-medium text-gray-900">
+                        <svg class="w-6 h-6 inline mr-2 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                        </svg>
+                        General Settings
+                    </h3>
+                    <p class="mt-1 max-w-2xl text-sm text-gray-500">Configure basic application settings and behavior.</p>
+                </div>
+                <div class="border-t border-gray-200 px-4 py-5 sm:px-6">
+                    <div class="grid grid-cols-1 gap-6 sm:grid-cols-2">
+                        <div>
+                            <label for="app_name" class="block text-sm font-medium text-gray-700">Application Name</label>
+                            <input type="text" id="app_name" name="app_name" value="{{ settings.app_name or 'Facebook Trucking News Bot' }}" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
                         </div>
-                        <div class="form-text">RSS feed URL or website URL</div>
-                        <div id="urlValidationResult"></div>
-                    </div>
-                    <div class="mb-3">
-                        <label for="sourceType" class="form-label">Type</label>
-                        <select class="form-select" id="sourceType" name="type">
-                            <option value="rss">RSS Feed</option>
-                            <option value="website">Website</option>
-                        </select>
+                        <div>
+                            <label for="app_theme" class="block text-sm font-medium text-gray-700">Theme</label>
+                            <select id="app_theme" name="app_theme" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                                <option value="light" {{ 'selected' if settings.app_theme == 'light' }}>Light</option>
+                                <option value="dark" {{ 'selected' if settings.app_theme == 'dark' }}>Dark</option>
+                                <option value="auto" {{ 'selected' if settings.app_theme == 'auto' }}>Auto</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="news_fetch_interval" class="block text-sm font-medium text-gray-700">News Fetch Interval (minutes)</label>
+                            <input type="number" id="news_fetch_interval" name="news_fetch_interval" value="{{ settings.news_fetch_interval or 60 }}" min="15" max="1440" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                        </div>
+                        <div>
+                            <label for="max_articles_per_fetch" class="block text-sm font-medium text-gray-700">Max Articles per Fetch</label>
+                            <input type="number" id="max_articles_per_fetch" name="max_articles_per_fetch" value="{{ settings.max_articles_per_fetch or 100 }}" min="10" max="500" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                        </div>
+                        <div class="sm:col-span-2">
+                            <div class="flex items-center">
+                                <input id="enable_auto_fetch" name="enable_auto_fetch" type="checkbox" {{ 'checked' if settings.enable_auto_fetch }} class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                                <label for="enable_auto_fetch" class="ml-2 block text-sm text-gray-900">Enable automatic news fetching</label>
+                            </div>
+                        </div>
                     </div>
                 </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Add Source</button>
+            </div>
+
+            <!-- Logging & Analytics -->
+            <div class="bg-white shadow overflow-hidden sm:rounded-lg">
+                <div class="px-4 py-5 sm:px-6">
+                    <h3 class="text-lg leading-6 font-medium text-gray-900">
+                        <svg class="w-6 h-6 inline mr-2 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                        </svg>
+                        Logging & Analytics
+                    </h3>
+                    <p class="mt-1 max-w-2xl text-sm text-gray-500">Configure logging levels and analytics collection.</p>
                 </div>
-            </form>
-        </div>
+                <div class="border-t border-gray-200 px-4 py-5 sm:px-6">
+                    <div class="grid grid-cols-1 gap-6 sm:grid-cols-2">
+                        <div>
+                            <label for="log_level" class="block text-sm font-medium text-gray-700">Log Level</label>
+                            <select id="log_level" name="log_level" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                                <option value="DEBUG" {{ 'selected' if settings.log_level == 'DEBUG' }}>Debug</option>
+                                <option value="INFO" {{ 'selected' if settings.log_level == 'INFO' }}>Info</option>
+                                <option value="WARNING" {{ 'selected' if settings.log_level == 'WARNING' }}>Warning</option>
+                                <option value="ERROR" {{ 'selected' if settings.log_level == 'ERROR' }}>Error</option>
+                            </select>
+                        </div>
+                        <div class="flex items-center">
+                            <input id="enable_logging" name="enable_logging" type="checkbox" {{ 'checked' if settings.enable_logging }} class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                            <label for="enable_logging" class="ml-2 block text-sm text-gray-900">Enable detailed logging</label>
+                        </div>
+                        <div class="flex items-center">
+                            <input id="enable_analytics" name="enable_analytics" type="checkbox" {{ 'checked' if settings.enable_analytics }} class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                            <label for="enable_analytics" class="ml-2 block text-sm text-gray-900">Enable analytics collection</label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- System Information -->
+            <div class="bg-white shadow overflow-hidden sm:rounded-lg">
+                <div class="px-4 py-5 sm:px-6">
+                    <h3 class="text-lg leading-6 font-medium text-gray-900">
+                        <svg class="w-6 h-6 inline mr-2 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path>
+                        </svg>
+                        System Information
+                    </h3>
+                    <p class="mt-1 max-w-2xl text-sm text-gray-500">Current system status and configuration.</p>
+                </div>
+                <div class="border-t border-gray-200 px-4 py-5 sm:px-6">
+                    <dl class="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2">
+                        <div>
+                            <dt class="text-sm font-medium text-gray-500">Language</dt>
+                            <dd class="mt-1 text-sm text-gray-900">{{ settings.language or 'en' }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-sm font-medium text-gray-500">Timezone</dt>
+                            <dd class="mt-1 text-sm text-gray-900">{{ settings.timezone or 'UTC' }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-sm font-medium text-gray-500">Database Status</dt>
+                            <dd class="mt-1 text-sm text-gray-900">
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                    Connected
+                                </span>
+                            </dd>
+                        </div>
+                        <div>
+                            <dt class="text-sm font-medium text-gray-500">Last Updated</dt>
+                            <dd class="mt-1 text-sm text-gray-900">{{ settings.updated_at.strftime('%Y-%m-%d %H:%M:%S') if settings.updated_at else 'Never' }}</dd>
+                        </div>
+                    </dl>
+                </div>
+            </div>
+        </form>
     </div>
 </div>
-{% endblock %}
-
-{% block scripts %}
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    updateSetupGuide();
-    loadQuickStats();
-    
-    // Initialize tooltips
-    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
-    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
-        return new bootstrap.Tooltip(tooltipTriggerEl);
-    });
-});
-
-function updateSetupGuide() {
-    // Check Facebook configuration
-    const fbPageId = document.getElementById('facebook_page_id').value;
-    const fbToken = document.getElementById('facebook_access_token').value;
-    if (fbPageId && fbToken) {
-        document.getElementById('step1-icon').className = 'fas fa-check-circle text-success me-2';
-    }
-    
-    // Check OpenAI configuration
-    const openaiKey = document.getElementById('openai_api_key').value;
-    if (openaiKey) {
-        document.getElementById('step2-icon').className = 'fas fa-check-circle text-success me-2';
-    }
-    
-    // Check if auto-posting is enabled
-    const autoPosting = document.getElementById('enabled').checked;
-    if (autoPosting) {
-        document.getElementById('step4-icon').className = 'fas fa-check-circle text-success me-2';
-    }
-}
-
-function loadQuickStats() {
-    fetch('/api/posts')
-        .then(response => response.json())
-        .then(posts => {
-            const total = posts.length;
-            const successful = posts.filter(p => p.status === 'posted').length;
-            const successRate = total > 0 ? Math.round((successful / total) * 100) : 0;
-            
-            document.getElementById('totalPosts').textContent = total;
-            document.getElementById('successRate').textContent = successRate + '%';
-        })
-        .catch(error => {
-            console.error('Error loading stats:', error);
-        });
-}
-
-function testFacebookConnection() {
-    const pageId = document.getElementById('facebook_page_id').value;
-    const token = document.getElementById('facebook_access_token').value;
-    
-    if (!pageId || !token) {
-        document.getElementById('facebookStatus').innerHTML = 
-            '<span class="badge bg-warning ms-2">Please enter both Page ID and Access Token</span>';
-        return;
-    }
-    
-    document.getElementById('facebookStatus').innerHTML = 
-        '<span class="badge bg-info ms-2">Testing...</span>';
-    
-    // You would implement the actual test here
-    setTimeout(() => {
-        document.getElementById('facebookStatus').innerHTML = 
-            '<span class="badge bg-success ms-2">Connection successful!</span>';
-    }, 2000);
-}
-
-function testOpenAIConnection() {
-    const apiKey = document.getElementById('openai_api_key').value;
-    
-    if (!apiKey) {
-        document.getElementById('openaiStatus').innerHTML = 
-            '<span class="badge bg-warning ms-2">Please enter API key</span>';
-        return;
-    }
-    
-    document.getElementById('openaiStatus').innerHTML = 
-        '<span class="badge bg-info ms-2">Testing...</span>';
-    
-    fetch('/api/test_openai', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ api_key: apiKey })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            document.getElementById('openaiStatus').innerHTML = 
-                '<span class="badge bg-success ms-2">Connection successful!</span>';
-        } else {
-            document.getElementById('openaiStatus').innerHTML = 
-                '<span class="badge bg-danger ms-2">Connection failed: ' + data.error + '</span>';
-        }
-    })
-    .catch(error => {
-        document.getElementById('openaiStatus').innerHTML = 
-            '<span class="badge bg-danger ms-2">Connection failed: ' + error.message + '</span>';
-    });
-}
-
-function testRSSFeed(sourceId) {
-    // Show loading state
-    const button = event.target.closest('button');
-    const originalIcon = button.innerHTML;
-    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-    button.disabled = true;
-    
-    fetch(`/api/test_rss/${sourceId}`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        }
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            showAlert(`RSS feed working: ${data.total_entries} entries found, ${data.trucking_entries} trucking-related`, 'success');
-            console.log('RSS details:', data.details);
-        } else {
-            showAlert(`RSS feed error: ${data.error}`, 'danger');
-        }
-    })
-    .catch(error => {
-        console.error('Error testing RSS:', error);
-        showAlert('Error testing RSS feed: ' + error.message, 'danger');
-    })
-    .finally(() => {
-        // Restore button state
-        button.innerHTML = originalIcon;
-        button.disabled = false;
-    });
-}
-
-function testAllRSS() {
-    const button = event.target.closest('button');
-    const originalText = button.innerHTML;
-    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Testing...';
-    button.disabled = true;
-    
-    fetch('/api/test_all_rss', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        }
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            const summary = data.summary;
-            const message = `RSS Test Complete: ${summary.working_sources}/${summary.total_sources} sources working, ${summary.total_entries} total entries, ${summary.total_trucking_entries} trucking-related`;
-            showAlert(message, 'success');
-            console.log('All RSS test results:', data);
-        } else {
-            showAlert('RSS test failed: ' + data.error, 'danger');
-        }
-    })
-    .catch(error => {
-        console.error('Error testing all RSS:', error);
-        showAlert('Error testing all RSS feeds: ' + error.message, 'danger');
-    })
-    .finally(() => {
-        button.innerHTML = originalText;
-        button.disabled = false;
-    });
-}
-
-function validateRSSUrl() {
-    const urlInput = document.getElementById('sourceUrl');
-    const url = urlInput.value.trim();
-    const resultDiv = document.getElementById('urlValidationResult');
-    
-    if (!url) {
-        resultDiv.innerHTML = '<div class="alert alert-warning mt-2">Please enter a URL to validate</div>';
-        return;
-    }
-    
-    // Show loading state
-    resultDiv.innerHTML = '<div class="alert alert-info mt-2"><i class="fas fa-spinner fa-spin"></i> Validating RSS feed...</div>';
-    
-    fetch('/api/validate_rss', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ url: url })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            const validation = data.validation;
-            const info = validation.info;
-            resultDiv.innerHTML = `
-                <div class="alert alert-success mt-2">
-                    <h6><i class="fas fa-check-circle"></i> RSS Feed Valid!</h6>
-                    <p><strong>Title:</strong> ${info.title || 'N/A'}</p>
-                    <p><strong>Type:</strong> ${validation.feed_type}</p>
-                    <p><strong>Entries:</strong> ${info.entry_count}</p>
-                    <p><strong>Description:</strong> ${info.description || 'N/A'}</p>
-                </div>
-            `;
-        } else {
-            const validation = data.validation;
-            let issuesHtml = '';
-            if (validation.issues && validation.issues.length > 0) {
-                issuesHtml = '<ul><li>' + validation.issues.join('</li><li>') + '</li></ul>';
-            }
-            
-            let warningsHtml = '';
-            if (validation.warnings && validation.warnings.length > 0) {
-                warningsHtml = '<p><strong>Warnings:</strong></p><ul><li>' + validation.warnings.join('</li><li>') + '</li></ul>';
-            }
-            
-            resultDiv.innerHTML = `
-                <div class="alert alert-danger mt-2">
-                    <h6><i class="fas fa-exclamation-triangle"></i> RSS Feed Invalid</h6>
-                    <p><strong>Type:</strong> ${validation.feed_type}</p>
-                    ${issuesHtml}
-                    ${warningsHtml}
-                </div>
-            `;
-        }
-    })
-    .catch(error => {
-        console.error('Error validating RSS:', error);
-        resultDiv.innerHTML = `
-            <div class="alert alert-danger mt-2">
-                <i class="fas fa-exclamation-triangle"></i> Error validating RSS feed: ${error.message}
-            </div>
-        `;
-    });
-}
-
-// Update setup guide when form values change
-document.getElementById('facebook_page_id').addEventListener('input', updateSetupGuide);
-document.getElementById('facebook_access_token').addEventListener('input', updateSetupGuide);
-document.getElementById('openai_api_key').addEventListener('input', updateSetupGuide);
-document.getElementById('enabled').addEventListener('change', updateSetupGuide);
-</script>
 {% endblock %}

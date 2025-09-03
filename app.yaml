@@ -9,13 +9,13 @@ env_variables:
   # OPENAI_API_KEY: "your-openai-key"
 
 automatic_scaling:
-  min_instances: 0
+  min_instances: 1  # Keep at least 1 instance warm
   max_instances: 10
   target_cpu_utilization: 0.6
   
 resources:
-  cpu: 1
-  memory_gb: 1
+  cpu: 2  # Increased from 1 to 2
+  memory_gb: 2  # Increased from 1GB to 2GB
   disk_size_gb: 10
 
 # Health check configuration

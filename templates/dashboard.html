@@ -1,250 +1,290 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard - Facebook Trucking News Automation{% endblock %}
+{% block title %}Dashboard - {{ current_profile.display_name }}{% endblock %}
 
 {% block content %}
-<div class="row">
-    <!-- Status Cards -->
-    <div class="col-md-3 mb-4">
-        <div class="card bg-primary text-white">
-            <div class="card-body">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        <h6 class="card-title">Total Posts</h6>
-                        <h3>{{ posts|length }}</h3>
-                    </div>
-                    <div class="align-self-center">
-                        <i class="fas fa-newspaper fa-2x"></i>
+<div x-data="dashboardData()" class="space-y-8">
+    <!-- Profile Status Card -->
+    <div class="bg-white rounded-lg shadow-sm border p-6">
+        <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-4">
+                <div class="text-4xl" x-text="currentProfile.icon || '🚛'"></div>
+                <div>
+                    <h2 class="text-2xl font-bold text-gray-900" x-text="currentProfile.display_name"></h2>
+                    <p class="text-gray-600" x-text="currentProfile.description || 'No description'"></p>
+                </div>
+            </div>
+            <div class="flex items-center space-x-4">
+                <div class="text-right">
+                    <div class="text-sm text-gray-500">Posts Today</div>
+                    <div class="text-2xl font-bold text-blue-600" x-text="postsToday || 0"></div>
+                </div>
+                <div class="text-right">
+                    <div class="text-sm text-gray-500">Status</div>
+                    <div class="flex items-center space-x-2">
+                        <span class="w-2 h-2 rounded-full" 
+                              :class="currentProfile.enabled ? 'bg-green-500' : 'bg-red-500'"></span>
+                        <span class="text-sm font-medium" 
+                              :class="currentProfile.enabled ? 'text-green-600' : 'text-red-600'"
+                              x-text="currentProfile.enabled ? 'Active' : 'Inactive'"></span>
                     </div>
                 </div>
             </div>
         </div>
     </div>
+
+    <!-- Quick Actions -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <!-- Fetch News Card -->
+        <div class="bg-white rounded-lg shadow-sm border p-6">
+            <div class="flex items-center space-x-3 mb-4">
+                <div class="p-2 bg-blue-100 rounded-lg">
+                    <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
+                    </svg>
+                </div>
+                <h3 class="text-lg font-semibold text-gray-900">Fetch News</h3>
+            </div>
+            <p class="text-gray-600 mb-4">Get the latest trucking news from all sources</p>
+            <button @click="fetchNews()" 
+                    :disabled="isFetching"
+                    class="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium py-2 px-4 rounded-lg transition-colors">
+                <span x-show="!isFetching">Fetch News</span>
+                <span x-show="isFetching" class="flex items-center justify-center space-x-2">
+                    <svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span>Fetching...</span>
+                </span>
+            </button>
+        </div>
+
+        <!-- Post to Facebook Card -->
+        <div class="bg-white rounded-lg shadow-sm border p-6">
+            <div class="flex items-center space-x-3 mb-4">
+                <div class="p-2 bg-green-100 rounded-lg">
+                    <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.220C2.307 15.334 1 13.764 1 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+                    </svg>
+                </div>
+                <h3 class="text-lg font-semibold text-gray-900">Post to Facebook</h3>
+            </div>
+            <p class="text-gray-600 mb-4">Post selected news to your Facebook page</p>
+            <button @click="showPostSelector = true" 
+                    class="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-lg transition-colors">
+                Select & Post
+            </button>
+        </div>
+
+        <!-- AI Enhancement Card -->
+        <div class="bg-white rounded-lg shadow-sm border p-6">
+            <div class="flex items-center space-x-3 mb-4">
+                <div class="p-2 bg-purple-100 rounded-lg">
+                    <svg class="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
+                    </svg>
+                </div>
+                <h3 class="text-lg font-semibold text-gray-900">AI Enhancement</h3>
+            </div>
+            <p class="text-gray-600 mb-4">Enhance content with AI for better engagement</p>
+            <div class="text-sm text-gray-500">
+                <span x-text="currentProfile.ai_enhancement_enabled ? 'Enabled' : 'Disabled'"></span>
+                <span class="ml-2">• Style: </span>
+                <span x-text="currentProfile.ai_post_style || 'informative'"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Active Operations -->
+    <div x-show="activeOperations.length > 0" class="bg-white rounded-lg shadow-sm border">
+        <div class="px-6 py-4 border-b border-gray-200">
+            <h3 class="text-lg font-semibold text-gray-900">Active Operations</h3>
+        </div>
+        <div class="p-6 space-y-4">
+            <template x-for="operation in activeOperations" :key="operation.operation_id">
+                <div class="border rounded-lg p-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center space-x-3">
+                            <div class="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                            <span class="font-medium text-gray-900" x-text="operation.description"></span>
+                        </div>
+                        <span class="text-sm text-gray-500" x-text="`${operation.progress}%`"></span>
+                    </div>
+                    
+                    <!-- Progress Bar -->
+                    <div class="w-full bg-gray-200 rounded-full h-2 mb-2">
+                        <div class="bg-blue-600 h-2 rounded-full transition-all duration-300" 
+                             :style="`width: ${operation.progress}%`"></div>
+                    </div>
+                    
+                    <div class="text-sm text-gray-600" x-text="operation.current_step"></div>
+                    
+                    <div class="flex items-center space-x-4 mt-2 text-xs text-gray-500">
+                        <span x-text="`Step ${operation.completed_steps} of ${operation.total_steps}`"></span>
+                        <span x-text="`Started: ${new Date(operation.start_time).toLocaleTimeString()}`"></span>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <!-- Recent Posts -->
+    <div class="bg-white rounded-lg shadow-sm border">
+        <div class="px-6 py-4 border-b border-gray-200">
+            <h3 class="text-lg font-semibold text-gray-900">Recent Posts</h3>
+        </div>
+        <div class="p-6">
+            {% if posts %}
+                <div class="space-y-4">
+                    {% for post in posts %}
+                    <div class="border rounded-lg p-4 hover:shadow-md transition-shadow">
+                        <div class="flex items-start justify-between">
+                            <div class="flex-1">
+                                <h4 class="font-medium text-gray-900 mb-2">{{ post.title }}</h4>
+                                <p class="text-gray-600 text-sm mb-3">{{ post.content[:200] }}{% if post.content|length > 200 %}...{% endif %}</p>
+                                
+                                <div class="flex items-center space-x-4 text-sm text-gray-500">
+                                    <span>Source: {{ post.source or 'Unknown' }}</span>
+                                    <span>Created: {{ post.created_at[:10] if post.created_at else 'Unknown' }}</span>
+                                    {% if post.posted_at %}
+                                    <span>Posted: {{ post.posted_at[:10] }}</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            
+                            <div class="flex items-center space-x-2">
+                                <!-- Status Badge -->
+                                <span class="px-2 py-1 text-xs rounded-full font-medium
+                                    {% if post.status == 'posted' %}bg-green-100 text-green-800
+                                    {% elif post.status == 'pending' %}bg-yellow-100 text-yellow-800
+                                    {% elif post.status == 'failed' %}bg-red-100 text-red-800
+                                    {% else %}bg-gray-100 text-gray-800{% endif %}">
+                                    {{ post.status|title }}
+                                </span>
+                                
+                                <!-- Action Buttons -->
+                                {% if post.status == 'pending' %}
+                                <button @click="postToFacebook({{ post.id }})" 
+                                        class="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.220C2.307 15.334 1 13.764 1 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+                                    </svg>
+                                </button>
+                                {% endif %}
+                                
+                                {% if post.url %}
+                                <a href="{{ post.url }}" target="_blank" 
+                                   class="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                                    </svg>
+                                </a>
+                                {% endif %}
+                            </div>
+                        </div>
+                        
+                        {% if post.error_message %}
+                        <div class="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+                            <div class="text-sm text-red-800">
+                                <strong>Error:</strong> {{ post.error_message }}
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="text-center py-8">
+                    <div class="text-gray-400 mb-4">
+                        <svg class="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                    </div>
+                    <h3 class="text-lg font-medium text-gray-900 mb-2">No posts yet</h3>
+                    <p class="text-gray-500">Start by fetching some news or create a custom post.</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Recent Operations -->
+    {% if operations %}
+    <div class="bg-white rounded-lg shadow-sm border">
+        <div class="px-6 py-4 border-b border-gray-200">
+            <h3 class="text-lg font-semibold text-gray-900">Recent Operations</h3>
+        </div>
+        <div class="p-6">
+            <div class="space-y-3">
+                {% for operation in operations %}
+                <div class="flex items-center justify-between p-3 border rounded-lg">
+                    <div class="flex items-center space-x-3">
+                        <span class="text-2xl">
+                            {% if operation.operation_type == 'fetch_news' %}📰
+                            {% elif operation.operation_type == 'post_to_facebook' %}📱
+                            {% else %}⚙️{% endif %}
+                        </span>
+                        <div>
+                            <div class="font-medium text-gray-900">{{ operation.description }}</div>
+                            <div class="text-sm text-gray-500">{{ operation.start_time[:19] if operation.start_time else 'Unknown' }}</div>
+                        </div>
+                    </div>
+                    
+                    <div class="flex items-center space-x-3">
+                        <span class="px-2 py-1 text-xs rounded-full font-medium
+                            {% if operation.status == 'completed' %}bg-green-100 text-green-800
+                            {% elif operation.status == 'running' %}bg-blue-100 text-blue-800
+                            {% elif operation.status == 'failed' %}bg-red-100 text-red-800
+                            {% else %}bg-gray-100 text-gray-800{% endif %}">
+                            {{ operation.status|title }}
+                        </span>
+                        
+                        {% if operation.duration %}
+                        <span class="text-sm text-gray-500">{{ "%.1f"|format(operation.duration) }}s</span>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Post Selector Modal -->
+<div x-show="showPostSelector" 
+     x-transition:enter="transition ease-out duration-300"
+     x-transition:enter-start="opacity-0"
+     x-transition:enter-end="opacity-100"
+     x-transition:leave="transition ease-in duration-200"
+     x-transition:leave-start="opacity-100"
+     x-transition:leave-end="opacity-0"
+     class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
     
-    <div class="col-md-3 mb-4">
-        <div class="card bg-success text-white">
-            <div class="card-body">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        <h6 class="card-title">Posted Today</h6>
-                        <h3 id="postedToday">-</h3>
+    <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+        <div class="mt-3">
+            <h3 class="text-lg font-medium text-gray-900 mb-4">Select Post to Share</h3>
+            
+            <div class="space-y-3 max-h-64 overflow-y-auto">
+                <template x-for="post in pendingPosts" :key="post.id">
+                    <div class="border rounded-lg p-3 hover:bg-gray-50 cursor-pointer"
+                         @click="selectPost(post)">
+                        <h4 class="font-medium text-gray-900 text-sm" x-text="post.title"></h4>
+                        <p class="text-gray-600 text-xs mt-1" x-text="post.content.substring(0, 100) + '...'"></p>
+                        <div class="text-xs text-gray-500 mt-2" x-text="'Source: ' + (post.source || 'Unknown')"></div>
                     </div>
-                    <div class="align-self-center">
-                        <i class="fas fa-check-circle fa-2x"></i>
-                    </div>
-                </div>
+                </template>
             </div>
-        </div>
-    </div>
-    
-    <div class="col-md-3 mb-4">
-        <div class="card bg-warning text-white">
-            <div class="card-body">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        <h6 class="card-title">Pending</h6>
-                        <h3 id="pendingPosts">-</h3>
-                    </div>
-                    <div class="align-self-center">
-                        <i class="fas fa-clock fa-2x"></i>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <div class="col-md-3 mb-4">
-        <div class="card {{ 'bg-success' if settings.enabled else 'bg-danger' }} text-white">
-            <div class="card-body">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        <h6 class="card-title">Auto-Posting</h6>
-                        <h3>{{ 'ON' if settings.enabled else 'OFF' }}</h3>
-                    </div>
-                    <div class="align-self-center">
-                        <i class="fas {{ 'fa-play' if settings.enabled else 'fa-pause' }} fa-2x"></i>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- AI Enhancement Status -->
-{% if settings.ai_enhancement_enabled and settings.openai_api_key %}
-<div class="row mb-4">
-    <div class="col-12">
-        <div class="alert alert-info">
-            <i class="fas fa-robot"></i>
-            <strong>AI Enhancement Active:</strong> Posts are being enhanced with engaging content using OpenAI (Style: {{ settings.ai_post_style.title() }})
-        </div>
-    </div>
-</div>
-{% elif settings.openai_api_key %}
-<div class="row mb-4">
-    <div class="col-12">
-        <div class="alert alert-warning">
-            <i class="fas fa-robot"></i>
-            <strong>AI Enhancement Available:</strong> OpenAI is configured but enhancement is disabled. 
-            <a href="{{ url_for('settings') }}">Enable it in settings</a>.
-        </div>
-    </div>
-</div>
-{% else %}
-<div class="row mb-4">
-    <div class="col-12">
-        <div class="alert alert-secondary">
-            <i class="fas fa-robot"></i>
-            <strong>AI Enhancement:</strong> Configure your OpenAI API key in 
-            <a href="{{ url_for('settings') }}">settings</a> to make posts more engaging.
-        </div>
-    </div>
-</div>
-{% endif %}
-
-<!-- Quick Actions -->
-<div class="row mb-4">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header">
-                <h5><i class="fas fa-bolt"></i> Quick Actions</h5>
-            </div>
-            <div class="card-body">
-                <div class="btn-group" role="group">
-                    <button type="button" class="btn btn-primary" onclick="fetchNews()">
-                        <i class="fas fa-download"></i> Fetch Latest News
-                    </button>
-                    <button type="button" class="btn btn-success" onclick="postNow()">
-                        <i class="fas fa-paper-plane"></i> Post Now
-                    </button>
-                    <button type="button" class="btn btn-info" data-bs-toggle="modal" data-bs-target="#aiPostModal">
-                        <i class="fas fa-robot"></i> Generate AI Post
-                    </button>
-                    <button type="button" class="btn btn-warning" onclick="getContentSuggestions()">
-                        <i class="fas fa-lightbulb"></i> Content Ideas
-                    </button>
-                    <button type="button" class="btn btn-secondary" onclick="checkHealth()">
-                        <i class="fas fa-heartbeat"></i> System Health
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Content Suggestions -->
-<div class="row mb-4" id="suggestionsRow" style="display: none;">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header">
-                <h5><i class="fas fa-lightbulb"></i> Content Suggestions</h5>
-            </div>
-            <div class="card-body" id="suggestionsContent">
-                <!-- Suggestions will be loaded here -->
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Recent Posts -->
-<div class="row">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h5><i class="fas fa-history"></i> Recent Posts</h5>
-                <button type="button" class="btn btn-sm btn-outline-primary" onclick="refreshPosts()">
-                    <i class="fas fa-sync-alt"></i> Refresh
+            
+            <div class="mt-6 flex justify-end space-x-3">
+                <button @click="showPostSelector = false" 
+                        class="px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors">
+                    Cancel
                 </button>
-            </div>
-            <div class="card-body">
-                {% if posts %}
-                    <div class="table-responsive">
-                        <table class="table table-hover">
-                            <thead>
-                                <tr>
-                                    <th>Title</th>
-                                    <th>Status</th>
-                                    <th>Source</th>
-                                    <th>Created</th>
-                                    <th>Posted</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody id="postsTableBody">
-                                {% for post in posts %}
-                                <tr>
-                                    <td>
-                                        <div class="post-title" title="{{ post.title }}">
-                                            {{ post.title[:60] }}{% if post.title|length > 60 %}...{% endif %}
-                                        </div>
-                                    </td>
-                                    <td>
-                                        <span class="badge bg-{{ 'success' if post.status == 'posted' else 'warning' if post.status == 'pending' else 'danger' }}">
-                                            {{ post.status.title() }}
-                                        </span>
-                                    </td>
-                                    <td>{{ post.source or 'Unknown' }}</td>
-                                    <td>
-                                        <small class="date-display" data-date="{{ post.created_at }}">{{ post.created_at }}</small>
-                                    </td>
-                                    <td>
-                                        {% if post.posted_at %}
-                                            <small class="date-display" data-date="{{ post.posted_at }}">{{ post.posted_at }}</small>
-                                        {% else %}
-                                            <small class="text-muted">Not posted</small>
-                                        {% endif %}
-                                    </td>
-                                    <td>
-                                        <div class="btn-group btn-group-sm" role="group">
-                                            <button type="button" class="btn btn-outline-primary btn-sm" 
-                                                    onclick="viewPost({{ post.id }})" data-bs-toggle="tooltip" title="View">
-                                                <i class="fas fa-eye"></i>
-                                            </button>
-                                            {% if post.status == 'pending' %}
-                                            <button type="button" class="btn btn-outline-success btn-sm" 
-                                                    onclick="postSingle({{ post.id }})" data-bs-toggle="tooltip" title="Post Now">
-                                                <i class="fas fa-paper-plane"></i>
-                                            </button>
-                                            {% endif %}
-                                            {% if post.facebook_post_id %}
-                                            <a href="https://facebook.com/{{ post.facebook_post_id }}" 
-                                               target="_blank" class="btn btn-outline-info btn-sm" data-bs-toggle="tooltip" title="View on Facebook">
-                                                <i class="fab fa-facebook"></i>
-                                            </a>
-                                            {% endif %}
-                                        </div>
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                {% else %}
-                    <div class="text-center text-muted py-4">
-                        <i class="fas fa-newspaper fa-3x mb-3"></i>
-                        <p>No posts yet. <a href="#" onclick="fetchNews()">Fetch some news</a> to get started!</p>
-                    </div>
-                {% endif %}
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Post View Modal -->
-<div class="modal fade" id="postViewModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Post Details</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body" id="postViewContent">
-                <!-- Post content will be loaded here -->
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                <button type="button" class="btn btn-primary" id="enhancePostBtn" onclick="enhancePost()">
-                    <i class="fas fa-robot"></i> Enhance with AI
+                <button @click="postSelectedPost()" 
+                        :disabled="!selectedPost"
+                        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white rounded-lg transition-colors">
+                    Post to Facebook
                 </button>
             </div>
         </div>
@@ -252,185 +292,131 @@
 </div>
 {% endblock %}
 
-{% block scripts %}
+{% block extra_scripts %}
 <script>
-// Load dashboard statistics
-document.addEventListener('DOMContentLoaded', function() {
-    loadDashboardStats();
-    formatDates();
-    
-    // Initialize tooltips
-    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
-    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
-        return new bootstrap.Tooltip(tooltipTriggerEl);
-    });
-});
-
-function formatDates() {
-    // Format all date displays
-    document.querySelectorAll('.date-display').forEach(function(element) {
-        const dateString = element.getAttribute('data-date');
-        if (dateString && dateString !== 'None') {
+function dashboardData() {
+    return {
+        isFetching: false,
+        showPostSelector: false,
+        selectedPost: null,
+        pendingPosts: [],
+        activeOperations: [],
+        postsToday: 0,
+        
+        async fetchNews() {
+            this.isFetching = true;
+            
             try {
-                const date = new Date(dateString);
-                if (!isNaN(date.getTime())) {
-                    element.textContent = date.toLocaleDateString('en-US', {
-                        month: '2-digit',
-                        day: '2-digit',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        hour12: false
-                    });
+                const response = await fetch('/fetch_news', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showToast('News fetch started successfully!', 'success');
+                    // The operation will be tracked via WebSocket
+                } else {
+                    showToast(`Error: ${data.error}`, 'error');
                 }
-            } catch (e) {
-                console.error('Error formatting date:', dateString, e);
+            } catch (error) {
+                showToast(`Error: ${error.message}`, 'error');
+            } finally {
+                this.isFetching = false;
             }
+        },
+        
+        async loadPendingPosts() {
+            try {
+                const response = await fetch('/api/posts?status=pending');
+                const data = await response.json();
+                this.pendingPosts = data.posts || [];
+            } catch (error) {
+                console.error('Error loading pending posts:', error);
+            }
+        },
+        
+        selectPost(post) {
+            this.selectedPost = post;
+        },
+        
+        async postSelectedPost() {
+            if (!this.selectedPost) return;
+            
+            try {
+                const formData = new FormData();
+                formData.append('post_id', this.selectedPost.id);
+                
+                const response = await fetch('/post_to_facebook', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showToast('Posting started successfully!', 'success');
+                    this.showPostSelector = false;
+                    this.selectedPost = null;
+                    // The operation will be tracked via WebSocket
+                } else {
+                    showToast(`Error: ${data.error}`, 'error');
+                }
+            } catch (error) {
+                showToast(`Error: ${error.message}`, 'error');
+            }
+        },
+        
+        async postToFacebook(postId) {
+            try {
+                const formData = new FormData();
+                formData.append('post_id', postId);
+                
+                const response = await fetch('/post_to_facebook', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showToast('Posting started successfully!', 'success');
+                } else {
+                    showToast(`Error: ${data.error}`, 'error');
+                }
+            } catch (error) {
+                showToast(`Error: ${error.message}`, 'error');
+            }
+        },
+        
+        async loadActiveOperations() {
+            try {
+                const response = await fetch('/api/operations');
+                const data = await response.json();
+                this.activeOperations = data.active_operations || [];
+            } catch (error) {
+                console.error('Error loading operations:', error);
+            }
+        },
+        
+        init() {
+            this.loadPendingPosts();
+            this.loadActiveOperations();
+            
+            // Refresh data every 30 seconds
+            setInterval(() => {
+                this.loadActiveOperations();
+            }, 30000);
         }
-    });
-}
-
-function loadDashboardStats() {
-    fetch('/api/posts')
-        .then(response => response.json())
-        .then(posts => {
-            const today = new Date().toDateString();
-            const postedToday = posts.filter(p => p.posted_at && new Date(p.posted_at).toDateString() === today).length;
-            const pending = posts.filter(p => p.status === 'pending').length;
-            
-            document.getElementById('postedToday').textContent = postedToday;
-            document.getElementById('pendingPosts').textContent = pending;
-        })
-        .catch(error => {
-            console.error('Error loading stats:', error);
-        });
-}
-
-function viewPost(postId) {
-    // Find the post data (you might want to make an API call here for full details)
-    const posts = {{ posts | tojson }};
-    const post = posts.find(p => p.id === postId);
-    
-    if (post) {
-        document.getElementById('postViewContent').innerHTML = `
-            <h6>Title:</h6>
-            <p>${post.title}</p>
-            
-            <h6>Content:</h6>
-            <div class="border p-3 bg-light" style="white-space: pre-wrap;">${post.content}</div>
-            
-            ${post.url ? `<h6 class="mt-3">URL:</h6><p><a href="${post.url}" target="_blank">${post.url}</a></p>` : ''}
-            
-            <h6 class="mt-3">Status:</h6>
-            <span class="badge bg-${post.status === 'posted' ? 'success' : post.status === 'pending' ? 'warning' : 'danger'}">
-                ${post.status.charAt(0).toUpperCase() + post.status.slice(1)}
-            </span>
-        `;
-        
-        // Store current post ID for enhancement
-        document.getElementById('enhancePostBtn').setAttribute('data-post-id', postId);
-        
-        const modal = new bootstrap.Modal(document.getElementById('postViewModal'));
-        modal.show();
     }
 }
 
-function enhancePost() {
-    const postId = document.getElementById('enhancePostBtn').getAttribute('data-post-id');
-    const posts = {{ posts | tojson }};
-    const post = posts.find(p => p.id === parseInt(postId));
-    
-    if (!post) return;
-    
-    showLoading();
-    
-    fetch('/api/enhance_content', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            title: post.title,
-            content: post.content,
-            url: post.url,
-            source: post.source
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        hideLoading();
-        if (data.success) {
-            // Show enhanced content
-            document.getElementById('postViewContent').innerHTML += `
-                <hr>
-                <h6>AI Enhanced Version:</h6>
-                <div class="border p-3 bg-success bg-opacity-10" style="white-space: pre-wrap;">${data.enhanced_content}</div>
-            `;
-        } else {
-            showAlert('Error enhancing content: ' + data.error, 'danger');
-        }
-    })
-    .catch(error => {
-        hideLoading();
-        showAlert('Error enhancing content: ' + error.message, 'danger');
-    });
-}
-
-function getContentSuggestions() {
-    showLoading();
-    
-    fetch('/api/content_suggestions', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            keywords: ['trucking', 'logistics', 'transportation', 'freight']
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        hideLoading();
-        if (data.success && data.suggestions.length > 0) {
-            let suggestionsHtml = '<div class="row">';
-            data.suggestions.forEach((suggestion, index) => {
-                suggestionsHtml += `
-                    <div class="col-md-6 mb-3">
-                        <div class="card">
-                            <div class="card-body">
-                                <h6 class="card-title">${suggestion.title}</h6>
-                                <p class="card-text small">${suggestion.description}</p>
-                                <span class="badge bg-secondary">${suggestion.style}</span>
-                                <button class="btn btn-sm btn-primary float-end" onclick="generateFromSuggestion('${suggestion.title}', '${suggestion.style}')">
-                                    <i class="fas fa-magic"></i> Generate
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            });
-            suggestionsHtml += '</div>';
-            
-            document.getElementById('suggestionsContent').innerHTML = suggestionsHtml;
-            document.getElementById('suggestionsRow').style.display = 'block';
-        } else {
-            showAlert('No suggestions available. Make sure OpenAI is configured.', 'warning');
-        }
-    })
-    .catch(error => {
-        hideLoading();
-        showAlert('Error getting suggestions: ' + error.message, 'danger');
-    });
-}
-
-function generateFromSuggestion(topic, style) {
-    document.getElementById('aiTopic').value = topic;
-    document.getElementById('aiStyle').value = style;
-    
-    const modal = new bootstrap.Modal(document.getElementById('aiPostModal'));
-    modal.show();
-    
-    // Auto-generate
-    setTimeout(() => generateAIPost(), 500);
-}
+// Initialize dashboard when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    // Dashboard is already initialized via Alpine.js
+});
 </script>
 {% endblock %}

@@ -7,7 +7,7 @@ import requests
 from bs4 import BeautifulSoup
 import logging
 from datetime import datetime, timedelta, timezone
-from newspaper import Article
+
 from models import db, Post, NewsSource, PostingLog
 import hashlib
 import re
@@ -219,58 +219,26 @@ class NewsFetcher:
                 link_text = link.get_text().strip()
                 if self._is_trucking_related(link_text) and len(link_text) > 10:
                     try:
-                        # Try newspaper first
-                        article = Article(href)
-                        article.config.browser_user_agent = headers['User-Agent']
-                        article.config.request_timeout = 15
-                        article.download()
-                        article.parse()
-                        
-                        if article.title and article.text:
+                        # Use requests method for article extraction
+                        alt_content = self._fetch_with_requests(href)
+                        if alt_content:
+                            # Try to extract title from the page
+                            title = link_text if len(link_text) > 10 else href.split('/')[-1].replace('-', ' ').title()
                             articles.append({
-                                'title': article.title,
+                                'title': title,
                                 'url': href,
-                                'content': article.text[:1000],
-                                'summary': article.text[:300],
-                                'image_url': article.top_image,
+                                'content': alt_content[:1000],
+                                'summary': alt_content[:300],
+                                'image_url': None,
                                 'source': source.name,
                                 'published': ''
                             })
                         else:
-                            # Fallback to requests method
-                            alt_content = self._fetch_with_requests(href)
-                            if alt_content:
-                                # Try to extract title from the page
-                                title = link_text if len(link_text) > 10 else href.split('/')[-1].replace('-', ' ').title()
-                                articles.append({
-                                    'title': title,
-                                    'url': href,
-                                    'content': alt_content[:1000],
-                                    'summary': alt_content[:300],
-                                    'image_url': None,
-                                    'source': source.name,
-                                    'published': ''
-                                })
+                            logger.warning(f"Could not extract content from {href}")
                             
                     except Exception as e:
                         logger.warning(f"Could not extract article from {href}: {e}")
-                        # Try alternative method
-                        try:
-                            alt_content = self._fetch_with_requests(href)
-                            if alt_content:
-                                title = link_text if len(link_text) > 10 else href.split('/')[-1].replace('-', ' ').title()
-                                articles.append({
-                                    'title': title,
-                                    'url': href,
-                                    'content': alt_content[:1000],
-                                    'summary': alt_content[:300],
-                                    'image_url': None,
-                                    'source': source.name,
-                                    'published': ''
-                                })
-                        except Exception as alt_e:
-                            logger.debug(f"Alternative fetch also failed for {href}: {alt_e}")
-                            continue
+                        continue
                         
         except Exception as e:
             logger.error(f"Error fetching from website {source.url}: {e}")
@@ -373,27 +341,58 @@ class NewsFetcher:
                 logger.error(f"AI enhancement failed, using basic formatting: {e}")
                 # Fall back to basic formatting
         
-        # Basic formatting (fallback)
+        # Enhanced basic formatting (fallback) - More engaging without links/source
         # Clean and truncate content
         if content:
             # Remove extra whitespace and newlines
             content = re.sub(r'\s+', ' ', content).strip()
             
             # Truncate to reasonable length for Facebook
-            if len(content) > 400:
-                content = content[:400] + '...'
+            if len(content) > 300:
+                content = content[:300].rsplit(' ', 1)[0] + "..."
+        
+        # Create engaging Facebook post content
+        import random
+        opening_phrases = [
+            "🚛 Breaking in trucking:",
+            "📰 Industry Update:",
+            "🔥 Hot off the press:",
+            "⚡ Trucking Alert:",
+            "📢 Important news for truckers:",
+            "🛣️ Latest from the road:",
+            "💼 Business update:",
+            "🎯 What's new in trucking:",
+            "🚚 Industry insights:",
+            "📊 Market update:"
+        ]
+        
+        opening = random.choice(opening_phrases)
         
         # Create Facebook post content
-        facebook_post = f"🚛 {title}\n\n"
+        facebook_post = f"{opening} {title}\n\n"
         
         if content and content != title:
             facebook_post += f"{content}\n\n"
         
-        facebook_post += f"Read more: {url}\n\n"
-        facebook_post += f"#TruckingNews #Logistics #Transportation #USATrucking #FreightNews"
+        # Add engaging hashtags without links or source
+        hashtags = "#TruckingNews #Logistics #Transportation #USATrucking #FreightNews"
         
-        if source:
-            facebook_post += f"\n\nSource: {source}"
+        # Add context-specific hashtags
+        content_lower = content.lower() if content else ""
+        if any(word in content_lower for word in ['driver', 'drivers']):
+            hashtags += " #TruckDrivers"
+        if any(word in content_lower for word in ['fleet', 'fleets']):
+            hashtags += " #FleetManagement"
+        if any(word in content_lower for word in ['safety', 'accident', 'regulation']):
+            hashtags += " #TruckingSafety"
+        if any(word in content_lower for word in ['fuel', 'diesel', 'gas']):
+            hashtags += " #FuelPrices"
+        if any(word in content_lower for word in ['technology', 'tech', 'digital', 'app']):
+            hashtags += " #TruckingTech"
+        if any(word in content_lower for word in ['electric', 'ev', 'green', 'sustainable']):
+            hashtags += " #ElectricTrucks"
+        
+        facebook_post += hashtags
         
         return facebook_post
     

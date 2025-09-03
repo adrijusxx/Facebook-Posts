@@ -38,6 +38,14 @@ fi
 
 echo -e "${BLUE}📋 Using project: $PROJECT_ID${NC}"
 
+# Check for environment file
+if [ -f ".env" ]; then
+    echo -e "${GREEN}✅ Found .env file - will use existing configuration${NC}"
+    source .env
+else
+    echo -e "${YELLOW}⚠️  No .env file found. You'll need to configure settings after deployment.${NC}"
+fi
+
 # Confirm deployment
 echo -e "${YELLOW}🚀 Ready to deploy to Google Cloud Run?${NC}"
 echo "This will:"
@@ -45,6 +53,8 @@ echo "  ✅ Enable required APIs"
 echo "  🐳 Build Docker container"
 echo "  🌐 Deploy to Cloud Run"
 echo "  📱 Make accessible on mobile"
+echo "  🔧 Configure environment variables"
+echo "  💾 Set up persistent storage"
 echo ""
 read -p "Continue? (y/N): " -n 1 -r
 echo
@@ -58,9 +68,35 @@ echo -e "${BLUE}🔧 Enabling required APIs...${NC}"
 gcloud services enable run.googleapis.com
 gcloud services enable cloudbuild.googleapis.com
 gcloud services enable containerregistry.googleapis.com
+gcloud services enable secretmanager.googleapis.com
 
-# Build and deploy
+# Create secrets if they don't exist (optional)
+echo -e "${BLUE}🔐 Setting up secrets management...${NC}"
+if [ ! -z "$SECRET_KEY" ]; then
+    echo "$SECRET_KEY" | gcloud secrets create trucking-bot-secret-key --data-file=- --replication-policy="automatic" 2>/dev/null || echo "Secret already exists"
+fi
+
+# Build and deploy with comprehensive configuration
 echo -e "${BLUE}🚀 Deploying to Cloud Run...${NC}"
+
+# Prepare environment variables
+ENV_VARS="SECRET_KEY=$(openssl rand -hex 32)"
+ENV_VARS="$ENV_VARS,DATABASE_URL=sqlite:///trucking_news.db"
+
+# Add optional environment variables if they exist
+if [ ! -z "$FACEBOOK_PAGE_ID" ]; then
+    ENV_VARS="$ENV_VARS,FACEBOOK_PAGE_ID=$FACEBOOK_PAGE_ID"
+fi
+
+if [ ! -z "$FACEBOOK_ACCESS_TOKEN" ]; then
+    ENV_VARS="$ENV_VARS,FACEBOOK_ACCESS_TOKEN=$FACEBOOK_ACCESS_TOKEN"
+fi
+
+if [ ! -z "$OPENAI_API_KEY" ]; then
+    ENV_VARS="$ENV_VARS,OPENAI_API_KEY=$OPENAI_API_KEY"
+fi
+
+# Deploy with enhanced configuration
 gcloud run deploy trucking-news-bot \
   --source . \
   --platform managed \
@@ -72,11 +108,33 @@ gcloud run deploy trucking-news-bot \
   --min-instances 0 \
   --max-instances 10 \
   --timeout 3600 \
-  --set-env-vars "SECRET_KEY=$(openssl rand -hex 32)" \
+  --set-env-vars "$ENV_VARS" \
+  --set-env-vars "FLASK_ENV=production" \
+  --set-env-vars "HOST=0.0.0.0" \
+  --set-env-vars "PORT=5000" \
   --quiet
 
 # Get the service URL
 SERVICE_URL=$(gcloud run services describe trucking-news-bot --region us-central1 --format="value(status.url)")
+
+# Set up custom domain if requested
+echo ""
+read -p "🌐 Do you want to set up a custom domain? (y/N): " -n 1 -r
+echo
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    echo -e "${BLUE}🔧 Setting up custom domain...${NC}"
+    echo "📋 To set up a custom domain:"
+    echo "1. Go to: https://console.cloud.google.com/run"
+    echo "2. Click on your service: trucking-news-bot"
+    echo "3. Go to 'Custom Domains' tab"
+    echo "4. Click 'Add Mapping'"
+    echo "5. Follow the instructions to verify your domain"
+fi
+
+# Set up monitoring and logging
+echo -e "${BLUE}📊 Setting up monitoring...${NC}"
+echo "📈 View logs: gcloud logs tail --service=trucking-news-bot --region=us-central1"
+echo "📊 Monitor: https://console.cloud.google.com/run"
 
 echo ""
 echo -e "${GREEN}✅ Deployment successful!${NC}"
@@ -98,19 +156,7 @@ echo "5. Start managing your trucking news empire! 🚛"
 echo ""
 echo -e "${BLUE}💰 Cost: Pay-per-use (likely $0-5/month)${NC}"
 echo -e "${BLUE}📊 Monitor: https://console.cloud.google.com/run${NC}"
-
-# Optional: Set up custom domain
-echo ""
-read -p "🌐 Do you want to set up a custom domain? (y/N): " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    echo "📋 To set up a custom domain:"
-    echo "1. Go to: https://console.cloud.google.com/run"
-    echo "2. Click on your service: trucking-news-bot"
-    echo "3. Go to 'Custom Domains' tab"
-    echo "4. Click 'Add Mapping'"
-    echo "5. Follow the instructions to verify your domain"
-fi
+echo -e "${BLUE}🔐 Secrets: https://console.cloud.google.com/security/secrets${NC}"
 
 echo ""
 echo -e "${GREEN}🎉 Happy trucking news automation! 🚛📱${NC}"

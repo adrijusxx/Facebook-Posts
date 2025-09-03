@@ -90,37 +90,35 @@ class FacebookTokenManager:
             
             long_lived_token = long_lived_result['access_token']
             
-            # Get page access token using the long-lived user token
-            endpoint = f"{self.base_url}/me/accounts"
+            # Get page access token directly using the page ID
+            endpoint = f"{self.base_url}/{page_id}"
             params = {
-                'access_token': long_lived_token
+                'access_token': long_lived_token,
+                'fields': 'id,name,access_token'
             }
             
             response = requests.get(endpoint, params=params, timeout=30)
             
             if response.status_code == 200:
                 data = response.json()
-                pages = data.get('data', [])
+                page_token = data.get('access_token')
+                page_name = data.get('name')
                 
-                # Find the specific page
-                for page in pages:
-                    if page.get('id') == page_id:
-                        page_token = page.get('access_token')
-                        if page_token:
-                            logger.info(f"Successfully renewed page access token for page {page_id}")
-                            return {
-                                'success': True,
-                                'access_token': page_token,
-                                'page_name': page.get('name'),
-                                'page_id': page.get('id'),
-                                'renewed_at': datetime.now(timezone.utc),
-                                'message': 'Page access token renewed successfully'
-                            }
-                
-                return {
-                    'success': False,
-                    'error': f'Page {page_id} not found in accessible pages'
-                }
+                if page_token:
+                    logger.info(f"Successfully renewed page access token for page {page_id}")
+                    return {
+                        'success': True,
+                        'access_token': page_token,
+                        'page_name': page_name,
+                        'page_id': data.get('id'),
+                        'renewed_at': datetime.now(timezone.utc),
+                        'message': 'Page access token renewed successfully'
+                    }
+                else:
+                    return {
+                        'success': False,
+                        'error': 'No access token found for this page'
+                    }
             else:
                 try:
                     error_data = response.json()

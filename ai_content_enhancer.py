@@ -53,7 +53,7 @@ class AIContentEnhancer:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a social media expert specializing in the trucking and logistics industry. Create engaging, professional Facebook posts that will resonate with truckers, fleet owners, and logistics professionals."
+                        "content": "You are a social media expert specializing in the trucking and logistics industry. Create highly engaging, shareable Facebook posts that will resonate with truckers, fleet owners, and logistics professionals. Write like you're talking to a friend who's a trucker - be informative but also make it interesting and worth sharing."
                     },
                     {
                         "role": "user",
@@ -97,38 +97,34 @@ Content: {content}
 Source: {source}
 
 Requirements:
-1. Make it engaging and relevant to truckers, fleet owners, and logistics professionals
-2. Use appropriate emojis (but don't overdo it)
-3. Include a compelling hook in the first line
-4. Keep it under 280 characters for the main text (excluding URL and hashtags)
-5. Make it professional but conversational
+1. Make it highly engaging and relevant to truckers, fleet owners, and logistics professionals
+2. Use appropriate emojis strategically (but don't overdo it)
+3. Include a compelling hook in the first line that grabs attention
+4. Keep it under 300 characters for the main text
+5. Make it professional but conversational and relatable
 6. Highlight the key impact or takeaway for the trucking community
 7. Use industry-relevant language that resonates with trucking professionals
-8. Don't include URL or hashtags - I'll add those separately
+8. Don't include hashtags, URLs, or source - I'll add those separately
+9. Make it shareable and encourage engagement
+10. Focus on why this matters to the trucking community and make them want to engage
 
-Focus on why this matters to the trucking community and make them want to engage with the post.
+Style: Write like you're talking to a friend who's a trucker. Be informative but also make it interesting and worth sharing.
 """
         return prompt
     
     def _finalize_post(self, enhanced_content, url, source):
-        """Add URL, hashtags, and source to the enhanced content"""
+        """Add hashtags to the enhanced content (no URLs or source)"""
         # Remove any URLs or hashtags that AI might have added
         enhanced_content = re.sub(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', '', enhanced_content)
         enhanced_content = re.sub(r'#\w+', '', enhanced_content)
         enhanced_content = enhanced_content.strip()
         
-        # Build final post
+        # Build final post with just content and hashtags
         final_post = enhanced_content + "\n\n"
         
-        if url:
-            final_post += f"Read more: {url}\n\n"
-        
-        # Add relevant hashtags
+        # Add relevant hashtags (no URLs or source)
         hashtags = self._get_relevant_hashtags(enhanced_content)
         final_post += hashtags
-        
-        if source:
-            final_post += f"\n\nSource: {source}"
         
         return final_post
     
@@ -164,7 +160,7 @@ Focus on why this matters to the trucking community and make them want to engage
         return " ".join(base_hashtags[:8])
     
     def _create_basic_post(self, title, content, url, source):
-        """Create a basic post without AI enhancement (fallback)"""
+        """Create a basic post without AI enhancement (fallback) - Enhanced and engaging"""
         # Create engaging opening
         opening_phrases = [
             "🚛 Breaking in trucking:",
@@ -174,27 +170,46 @@ Focus on why this matters to the trucking community and make them want to engage
             "📢 Important news for truckers:",
             "🛣️ Latest from the road:",
             "💼 Business update:",
+            "🎯 What's new in trucking:",
+            "🚚 Industry insights:",
+            "📊 Market update:",
+            "💡 Industry spotlight:",
+            "🌟 Trending in trucking:"
         ]
         
         import random
         opening = random.choice(opening_phrases)
         
         # Clean and truncate content
-        if content and len(content) > 200:
-            content = content[:200].rsplit(' ', 1)[0] + "..."
+        if content and len(content) > 250:
+            content = content[:250].rsplit(' ', 1)[0] + "..."
         
         post = f"{opening} {title}\n\n"
         
         if content and content != title:
             post += f"{content}\n\n"
         
-        if url:
-            post += f"Read more: {url}\n\n"
+        # Add engaging hashtags without links or source
+        hashtags = "#TruckingNews #Logistics #Transportation #FreightNews #USATrucking"
         
-        post += "#TruckingNews #Logistics #Transportation #FreightNews #USATrucking"
+        # Add context-specific hashtags
+        content_lower = content.lower() if content else ""
+        if any(word in content_lower for word in ['driver', 'drivers']):
+            hashtags += " #TruckDrivers"
+        if any(word in content_lower for word in ['fleet', 'fleets']):
+            hashtags += " #FleetManagement"
+        if any(word in content_lower for word in ['safety', 'accident', 'regulation']):
+            hashtags += " #TruckingSafety"
+        if any(word in content_lower for word in ['fuel', 'diesel', 'gas']):
+            hashtags += " #FuelPrices"
+        if any(word in content_lower for word in ['technology', 'tech', 'digital', 'app']):
+            hashtags += " #TruckingTech"
+        if any(word in content_lower for word in ['electric', 'ev', 'green', 'sustainable']):
+            hashtags += " #ElectricTrucks"
+        if any(word in content_lower for word in ['supply chain', 'shipping', 'cargo']):
+            hashtags += " #SupplyChain"
         
-        if source:
-            post += f"\n\nSource: {source}"
+        post += hashtags
         
         return post
     
@@ -223,12 +238,14 @@ Focus on why this matters to the trucking community and make them want to engage
 {style_instruction} about {topic} for the trucking and logistics industry.
 
 Requirements:
-1. Keep it engaging and relevant to truckers, fleet owners, and logistics professionals
-2. Use appropriate emojis sparingly
-3. Keep it under 250 characters
-4. Make it professional but conversational
-5. Encourage engagement if appropriate
-6. Don't include hashtags - I'll add those
+1. Make it highly engaging and relevant to truckers, fleet owners, and logistics professionals
+2. Use appropriate emojis strategically (but don't overdo it)
+3. Keep it under 280 characters
+4. Make it professional but conversational and relatable
+5. Encourage engagement and make it shareable
+6. Don't include hashtags - I'll add those separately
+7. Write like you're talking to a friend who's a trucker
+8. Make it interesting and worth sharing
 
 Topic: {topic}
 """
@@ -238,7 +255,7 @@ Topic: {topic}
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a social media expert for the trucking industry. Create engaging content that resonates with trucking professionals."
+                        "content": "You are a social media expert for the trucking industry. Create highly engaging, shareable content that resonates with trucking professionals. Write like you're talking to a friend who's a trucker - be informative but also make it interesting and worth sharing."
                     },
                     {
                         "role": "user",
